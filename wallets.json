@@ -1,0 +1,328 @@
+[
+  {
+    "address": "0x184f9db967ce5703617a15d00c5e656c2c28cb0d",
+    "addedOn": "2025-08-22T14:00:29.721Z",
+    "totalPnl": 121984.52222900011,
+    "totalTrades": 11,
+    "winningTrades": 11,
+    "cooldowns": {},
+    "favorite": true
+  },
+  {
+    "address": "0x6b78be2ba4d55d5ee434c7d47fb3bbaffafc5e9c",
+    "addedOn": "2025-08-22T14:01:03.361Z",
+    "totalPnl": 0,
+    "totalTrades": 0,
+    "winningTrades": 0,
+    "cooldowns": {},
+    "favorite": false
+  },
+  {
+    "address": "0x350e33a777d510616fbdb483d1de3b50d1edfcfb",
+    "addedOn": "2025-08-22T14:01:15.459Z",
+    "totalPnl": -151.3500000000003,
+    "totalTrades": 3,
+    "winningTrades": 0,
+    "cooldowns": {
+      "XPL": "2025-08-26T21:56:09.162Z"
+    },
+    "favorite": false
+  },
+  {
+    "address": "0x8cc94dc843e1ea7a19805e0cca43001123512b6a",
+    "addedOn": "2025-08-22T14:01:24.671Z",
+    "totalPnl": 461.50206233333336,
+    "totalTrades": 3,
+    "winningTrades": 1,
+    "cooldowns": {
+      "LINK": "2025-08-26T21:56:09.532Z"
+    },
+    "favorite": false
+  },
+  {
+    "address": "0xb3e475368ed0fa0ad23c04de0423d48a0758806f",
+    "addedOn": "2025-08-22T14:01:33.923Z",
+    "totalPnl": 0,
+    "totalTrades": 0,
+    "winningTrades": 0,
+    "cooldowns": {},
+    "favorite": false
+  },
+  {
+    "address": "0x8e80c4b533dd977cf716b5c24fd9223129272804",
+    "addedOn": "2025-08-22T14:01:53.530Z",
+    "totalPnl": 254096.98346255178,
+    "totalTrades": 54,
+    "winningTrades": 8,
+    "cooldowns": {
+      "ETH": "2025-08-26T21:56:10.505Z",
+      "SOL": "2025-08-28T22:15:46.687Z",
+      "AAVE": "2025-08-24T20:32:12.634Z",
+      "SUI": "2025-08-27T23:19:57.283Z",
+      "BTC": "2025-08-26T21:56:09.847Z",
+      "XRP": "2025-08-27T23:12:05.078Z",
+      "DOGE": "2025-08-27T23:03:00.391Z",
+      "PENGU": "2025-08-27T23:19:57.764Z"
+    },
+    "favorite": false
+  },
+  {
+    "address": "0x1f250df59a777d61cb8bd043c12970f3afe4f925",
+    "addedOn": "2025-08-22T14:02:12.079Z",
+    "totalPnl": 0,
+    "totalTrades": 0,
+    "winningTrades": 0,
+    "cooldowns": {},
+    "favorite": false
+  },
+  {
+    "address": "0xa23190045c4aebeb724844ce622465475e539bae",
+    "addedOn": "2025-08-22T14:23:17.776Z",
+    "totalPnl": -93607.863915,
+    "totalTrades": 7,
+    "winningTrades": 0,
+    "cooldowns": {},
+    "favorite": false
+  },
+  {
+    "address": "0x4138f7b064dc467a7c801c8ce19b94c98120a473",
+    "addedOn": "2025-08-22T14:23:25.664Z",
+    "totalPnl": 73864.66805313992,
+    "totalTrades": 50,
+    "winningTrades": 16,
+    "cooldowns": {
+      "ETH": "2025-08-27T23:03:01.333Z",
+      "SOL": "2025-08-27T23:03:00.748Z",
+      "XRP": "2025-08-24T20:32:17.645Z",
+      "BTC": "2025-08-26T21:56:10.863Z"
+    },
+    "favorite": false
+  },
+  {
+    "address": "0x1a7d1378d1b9df23f147fcf41e9fe887cde81ac3",
+    "addedOn": "2025-08-22T14:23:50.118Z",
+    "totalPnl": 71275.37847000008,
+    "totalTrades": 22,
+    "winningTrades": 22,
+    "cooldowns": {},
+    "favorite": true
+  },
+  {
+    "address": "0x743b6a564dc23912cc6d67e78db6e07e66bd3515",
+    "addedOn": "2025-08-22T14:24:36.371Z",
+    "totalPnl": 0,
+    "totalTrades": 0,
+    "winningTrades": 0,
+    "cooldowns": {},
+    "favorite": false
+  },
+  {
+    "address": "0xaa0e2529f9c33e3ad86346fe26fefc4bc635fc67",
+    "addedOn": "2025-08-22T14:24:53.102Z",
+    "totalPnl": 0,
+    "totalTrades": 0,
+    "winningTrades": 0,
+    "cooldowns": {},
+    "favorite": false
+  },
+  {
+    "address": "0x2ba553d9f990a3b66b03b2dc0d030dfc1c061036",
+    "addedOn": "2025-08-22T14:25:13.097Z",
+    "totalPnl": 59537.76706864975,
+    "totalTrades": 272,
+    "winningTrades": 25,
+    "cooldowns": {
+      "ETH": "2025-08-27T23:03:01.333Z",
+      "BTC": "2025-08-26T21:56:10.863Z",
+      "SOL": "2025-08-24T20:32:14.258Z",
+      "@142": "2025-08-24T20:32:18.197Z"
+    },
+    "favorite": false
+  },
+  {
+    "address": "0xecb63caa47c7c4e77f60f1ce858cf28dc2b82b00",
+    "addedOn": "2025-08-22T14:25:30.937Z",
+    "totalPnl": -86101.73032652511,
+    "totalTrades": 517,
+    "winningTrades": 26,
+    "cooldowns": {
+      "SOL": "2025-08-28T22:15:46.687Z",
+      "AAVE": "2025-08-24T20:32:12.634Z",
+      "SUI": "2025-08-24T20:32:13.069Z",
+      "BTC": "2025-08-27T23:19:58.277Z",
+      "XRP": "2025-08-24T20:32:13.854Z",
+      "@142": "2025-08-27T23:12:06.819Z",
+      "ETH": "2025-08-27T23:12:06.429Z",
+      "LINK": "2025-08-26T21:56:09.532Z",
+      "DOGE": "2025-08-27T23:03:00.391Z",
+      "@107": "2025-08-27T23:12:05.565Z",
+      "@151": "2025-08-27T23:12:05.960Z"
+    },
+    "favorite": false
+  },
+  {
+    "address": "0xbde2ddc49a2e6827300faa6afc93d572114a60b1",
+    "addedOn": "2025-08-24T18:18:47.500Z",
+    "totalPnl": 0,
+    "totalTrades": 0,
+    "winningTrades": 0,
+    "cooldowns": {},
+    "favorite": false
+  },
+  {
+    "address": "0x2ac1fa38a82738c3875b3ac385fbade067e3d123",
+    "addedOn": "2025-08-24T18:19:35.290Z",
+    "totalPnl": 0,
+    "totalTrades": 0,
+    "winningTrades": 0,
+    "cooldowns": {},
+    "favorite": false
+  },
+  {
+    "address": "0x77435010f5e34e2fa04f5ce7d49e57a8bd8de4fe",
+    "addedOn": "2025-08-24T18:20:19.192Z",
+    "totalPnl": -576797.1140194501,
+    "totalTrades": 317,
+    "winningTrades": 12,
+    "cooldowns": {
+      "ETH": "2025-08-25T08:27:36.443Z",
+      "BTC": "2025-08-26T21:56:10.863Z"
+    },
+    "favorite": false
+  },
+  {
+    "address": "0x45ab58a2034f03aa446baf3bb1d236706f866cbc",
+    "addedOn": "2025-08-24T18:21:53.647Z",
+    "totalPnl": -91231.54930999997,
+    "totalTrades": 8,
+    "winningTrades": 0,
+    "cooldowns": {},
+    "favorite": false
+  },
+  {
+    "address": "0x523852be2db1a76a0e088ecbff32e849544054e5",
+    "addedOn": "2025-08-24T18:22:17.846Z",
+    "totalPnl": 0,
+    "totalTrades": 0,
+    "winningTrades": 0,
+    "cooldowns": {},
+    "favorite": false
+  },
+  {
+    "address": "0xbfc79c444c41a74516bf31237ebf586a231480b4",
+    "addedOn": "2025-08-24T18:23:07.089Z",
+    "totalPnl": -6558.500000000015,
+    "totalTrades": 15,
+    "winningTrades": 0,
+    "cooldowns": {
+      "@142": "2025-08-24T20:32:18.197Z",
+      "XPL": "2025-08-26T21:56:09.162Z"
+    },
+    "favorite": false
+  },
+  {
+    "address": "0xb8b9e3097c8b1dddf9c5ea9d48a7ebeaf09d67d2",
+    "addedOn": "2025-08-25T08:29:48.382Z",
+    "totalPnl": 0,
+    "totalTrades": 0,
+    "winningTrades": 0,
+    "cooldowns": {},
+    "favorite": false
+  },
+  {
+    "address": "0xcc2fcbbe74bcef78bd512ba8831a8c6db50054de",
+    "addedOn": "2025-08-27T11:48:17.309Z",
+    "totalPnl": 0,
+    "totalTrades": 0,
+    "winningTrades": 0,
+    "cooldowns": {},
+    "favorite": false
+  },
+  {
+    "address": "0xab8178614b22bdabe2b4fc727f562a02496d892f",
+    "addedOn": "2025-08-27T11:48:24.473Z",
+    "totalPnl": 0,
+    "totalTrades": 0,
+    "winningTrades": 0,
+    "cooldowns": {},
+    "favorite": false
+  },
+  {
+    "address": "0x795cfd1b03eafc11c4ec958b8a94cfc9aa64a242",
+    "addedOn": "2025-08-27T11:48:31.442Z",
+    "totalPnl": 0,
+    "totalTrades": 0,
+    "winningTrades": 0,
+    "cooldowns": {},
+    "favorite": false
+  },
+  {
+    "address": "0xe92ea8999ad285f887abc3fa3ff8fde8ecf559cb",
+    "addedOn": "2025-08-27T11:49:04.468Z",
+    "totalPnl": 0,
+    "totalTrades": 0,
+    "winningTrades": 0,
+    "cooldowns": {
+      "SOL": "2025-08-28T22:15:46.687Z"
+    },
+    "favorite": false
+  },
+  {
+    "address": "0x089563d1f7e3d20791d3f4224bae908952332c21",
+    "addedOn": "2025-08-27T11:49:14.180Z",
+    "totalPnl": 0,
+    "totalTrades": 0,
+    "winningTrades": 0,
+    "cooldowns": {},
+    "favorite": false
+  },
+  {
+    "address": "0x5b5d51203a0f9079f8aeb098a6523a13f298c060",
+    "addedOn": "2025-08-27T11:51:42.592Z",
+    "totalPnl": 0,
+    "totalTrades": 0,
+    "winningTrades": 0,
+    "cooldowns": {},
+    "favorite": false
+  },
+  {
+    "address": "0x27c9fa86c91b84ddfa15de58c482ff662498d65d",
+    "addedOn": "2025-08-27T11:51:54.565Z",
+    "totalPnl": -26.475295999999954,
+    "totalTrades": 1,
+    "winningTrades": 0,
+    "cooldowns": {
+      "SOL": "2025-08-28T22:15:46.687Z"
+    },
+    "favorite": false
+  },
+  {
+    "address": "0x9b422e571eb2cb9837efdc4f9087194d65fb070a",
+    "addedOn": "2025-08-27T11:52:44.020Z",
+    "totalPnl": 0,
+    "totalTrades": 0,
+    "winningTrades": 0,
+    "cooldowns": {},
+    "favorite": false
+  },
+  {
+    "address": "0xcf7c4feb434751146a48b895e96caeb15838f92c",
+    "addedOn": "2025-08-27T11:52:50.612Z",
+    "totalPnl": -43942.39999999991,
+    "totalTrades": 96,
+    "winningTrades": 0,
+    "cooldowns": {
+      "SOL": "2025-08-27T16:33:14.522Z"
+    },
+    "favorite": false
+  },
+  {
+    "address": "0xd076114257b043891da51194321300c2cd2327bb",
+    "addedOn": "2025-08-27T11:53:12.091Z",
+    "totalPnl": 0,
+    "totalTrades": 0,
+    "winningTrades": 0,
+    "cooldowns": {},
+    "favorite": false
+  }
+]
