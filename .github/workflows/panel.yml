@@ -1,0 +1,42 @@
+name: Auto Load Panel
+
+on:
+  schedule:
+    - cron: "* * * * *"   # هر 1 دقیقه
+  workflow_dispatch:      # اجرای دستی
+
+jobs:
+  load-panel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check timestamp
+        run: echo "🚀 Workflow triggered at $(date)"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install Puppeteer
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgbm-dev
+          npm init -y
+          npm install puppeteer
+
+      - name: Load panel
+        run: |
+          node - <<'EOF'
+          const puppeteer = require('puppeteer');
+          (async () => {
+            const browser = await puppeteer.launch({
+              headless: true,
+              args: ['--no-sandbox']
+            });
+            const page = await browser.newPage();
+            await page.goto('https://hypersignal-production.up.railway.app/signals', {waitUntil: 'networkidle2'});
+            await new Promise(resolve => setTimeout(resolve, 5000)); // صبر اضافه برای لود کامل
+            console.log("✅ Panel loaded at", new Date().toISOString());
+            await browser.close();
+          })();
+          EOF
