@@ -4,9 +4,9 @@
     "pair": "SOL",
     "type": "SHORT",
     "entryPrice": "213.9601",
-    "pnl": "-1923.96",
-    "roi": "-2.29",
-    "status": "Open",
+    "pnl": "41963.06",
+    "roi": "49.94",
+    "status": "TP",
     "timestamp": "2025-08-28T22:15:41.066Z",
     "leverage": "10.00",
     "liquidationPrice": "N/A",
@@ -19,7 +19,7 @@
       "0xe92ea8999ad285f887abc3fa3ff8fde8ecf559cb",
       "0xecb63caa47c7c4e77f60f1ce858cf28dc2b82b00"
     ],
-    "currentPrice": "214.4500",
+    "currentPrice": "203.2750",
     "takeProfitTargets": [
       "208.6111",
       "205.4017",
@@ -3199,8 +3199,8 @@
     "pair": "BTC",
     "type": "LONG",
     "entryPrice": "111393.2799",
-    "pnl": "34772.73",
-    "roi": "9.75",
+    "pnl": "-6395.47",
+    "roi": "-1.79",
     "status": "Open",
     "timestamp": "2025-08-26T21:51:56.272Z",
     "leverage": "10.00",
@@ -3213,7 +3213,7 @@
       "0x4138f7b064dc467a7c801c8ce19b94c98120a473",
       "0x77435010f5e34e2fa04f5ce7d49e57a8bd8de4fe"
     ],
-    "currentPrice": "112479.5000",
+    "currentPrice": "111193.5000",
     "takeProfitTargets": [
       "114178.1119",
       "115849.0111",

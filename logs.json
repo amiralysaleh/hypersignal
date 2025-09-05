@@ -1064,5 +1064,23 @@
     "level": "INFO",
     "message": "No new signals detected in this run.",
     "timestamp": "2025-08-27T23:28:13.633Z"
+  },
+  {
+    "timestamp": "2025-09-05T18:32:15.954Z",
+    "level": "INFO",
+    "message": "Signal detection skipped: Insufficient configuration or no tracked wallets.",
+    "context": {}
+  },
+  {
+    "timestamp": "2025-09-05T18:32:31.872Z",
+    "level": "INFO",
+    "message": "Signal detection skipped: Insufficient configuration or no tracked wallets.",
+    "context": {}
+  },
+  {
+    "timestamp": "2025-09-05T18:33:56.878Z",
+    "level": "INFO",
+    "message": "Signal detection skipped: Insufficient configuration or no tracked wallets.",
+    "context": {}
   }
 ]
