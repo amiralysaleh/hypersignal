@@ -1,0 +1,17 @@
+2025-09-05T18:32:26: Backend server running on port 3001
+2025-09-05T18:32:26: WebSocket server ready for connections
+2025-09-05T18:32:26: Signal detection interval set to 90000ms
+2025-09-05T18:32:26: Price update interval set to 45000ms
+2025-09-05T18:32:26: Backend service fully initialized and ready for 24/7 operation
+2025-09-05T18:32:28: Starting price update process...
+2025-09-05T18:32:29: Price update completed
+2025-09-05T18:32:31: Starting signal detection process...
+2025-09-05T18:32:31: [2025-09-05T18:32:31.872Z] INFO: Signal detection skipped: Insufficient configuration or no tracked wallets. {}
+2025-09-05T18:32:31: Signal detection completed
+2025-09-05T18:33:11: Starting price update process...
+2025-09-05T18:33:12: Price update completed
+2025-09-05T18:33:56: Starting signal detection process...
+2025-09-05T18:33:56: Starting price update process...
+2025-09-05T18:33:56: [2025-09-05T18:33:56.878Z] INFO: Signal detection skipped: Insufficient configuration or no tracked wallets. {}
+2025-09-05T18:33:56: Signal detection completed
+2025-09-05T18:33:57: Price update completed

@@ -1,15 +1,18 @@
 
 'use client';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import { Bar, BarChart, CartesianGrid, Pie, PieChart, XAxis, YAxis, Tooltip as RechartsTooltip, Cell, Legend, LineChart, Line } from 'recharts';
-import { Activity, CheckCircle, Signal, Users, TrendingUp, XCircle, Clock } from 'lucide-react';
+import { Activity, CheckCircle, Signal, Users, TrendingUp, XCircle, Clock, Wifi, WifiOff, AlertTriangle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { getDashboardData, DashboardData } from './actions';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { useWebSocket } from '@/hooks/useWebSocket';
+import { fetchDashboardData, WEBSOCKET_URL } from '@/lib/api';
 
 const chartConfig = {
   winrate: {
@@ -27,24 +30,58 @@ const pieChartColors = {
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        const dashboardData = await getDashboardData();
-        setData(dashboardData);
-      } catch (error) {
-        console.error("Failed to fetch dashboard data", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    const interval = setInterval(fetchData, 30000); // Refresh every 30 seconds
-    fetchData();
-
-    return () => clearInterval(interval);
+  // Fallback data fetching function
+  const fetchData = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const dashboardData = await fetchDashboardData();
+      setData(dashboardData);
+      setLastUpdate(new Date());
+    } catch (error) {
+      console.error("Failed to fetch dashboard data", error);
+      setError("Failed to fetch dashboard data. Retrying...");
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  // WebSocket for real-time updates
+  const { isConnected, connectionStatus, lastMessage } = useWebSocket({
+    url: WEBSOCKET_URL,
+    onMessage: (message) => {
+      if (message.type === 'dashboard_update') {
+        setData(message.data);
+        setLastUpdate(new Date());
+        setError(null);
+        if (loading) setLoading(false);
+      }
+    },
+    onError: (error) => {
+      console.error('WebSocket error:', error);
+      setError('Real-time connection lost. Using fallback polling.');
+    }
+  });
+
+  // Fallback polling when WebSocket is not connected
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    
+    if (!isConnected) {
+      // Initial fetch
+      fetchData();
+      
+      // Set up polling as fallback
+      interval = setInterval(fetchData, 30000);
+    }
+
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isConnected, fetchData]);
   
   const pieData = data ? Object.entries(data.signalOutcomes).map(([name, value]) => ({ name, value, fill: pieChartColors[name as keyof typeof pieChartColors] })) : [];
   
@@ -81,9 +118,57 @@ export default function DashboardPage() {
         }
     }
 
+  const ConnectionStatus = () => {
+    const getStatusColor = () => {
+      switch (connectionStatus) {
+        case 'connected': return 'text-green-600';
+        case 'connecting': return 'text-yellow-600';
+        case 'error': return 'text-red-600';
+        default: return 'text-gray-600';
+      }
+    };
+
+    const getStatusIcon = () => {
+      switch (connectionStatus) {
+        case 'connected': return <Wifi className="h-4 w-4" />;
+        case 'connecting': return <AlertTriangle className="h-4 w-4" />;
+        case 'error': return <WifiOff className="h-4 w-4" />;
+        default: return <WifiOff className="h-4 w-4" />;
+      }
+    };
+
+    return (
+      <div className={cn("flex items-center gap-2 text-sm", getStatusColor())}>
+        {getStatusIcon()}
+        <span className="capitalize">{connectionStatus}</span>
+        {lastUpdate && (
+          <span className="text-muted-foreground ml-2">
+            Last updated: {lastUpdate.toLocaleTimeString()}
+          </span>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="flex flex-col gap-6">
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      {/* Connection Status and Error Alert */}
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Trading Dashboard</h1>
+          <p className="text-muted-foreground">Real-time crypto signals and wallet tracking</p>
+        </div>
+        <ConnectionStatus />
+      </div>
+      
+      {error && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+      {/* Stats Cards */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatsCard 
           title="Total Unrealized ROI" 
           value={loading ? <Skeleton className="h-8 w-24" /> : `${data?.totalRoi.toFixed(2)}%`}
@@ -114,15 +199,16 @@ export default function DashboardPage() {
         />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
-        <Card className="lg:col-span-4">
+      {/* Charts Section */}
+      <div className="grid gap-4 lg:grid-cols-7">
+        <Card className="lg:col-span-4 min-h-0">
           <CardHeader>
             <CardTitle>Performance Overview</CardTitle>
             <CardDescription>Monthly Win Rate from Closed Signals</CardDescription>
           </CardHeader>
-          <CardContent className="pl-2">
-            {loading ? <Skeleton className="h-[300px] w-full"/> : 
-            <ChartContainer config={chartConfig} className="h-[300px] w-full">
+          <CardContent className="pl-2 pb-4">
+            {loading ? <Skeleton className="h-[280px] w-full"/> : 
+            <ChartContainer config={chartConfig} className="h-[280px] w-full">
               <LineChart data={data?.performanceChartData} accessibilityLayer>
                 <CartesianGrid vertical={false} />
                 <XAxis
@@ -154,14 +240,14 @@ export default function DashboardPage() {
             }
           </CardContent>
         </Card>
-        <Card className="lg:col-span-3">
+        <Card className="lg:col-span-3 min-h-0">
           <CardHeader>
             <CardTitle>Signal Outcomes</CardTitle>
             <CardDescription>Based on all open and historical signals</CardDescription>
           </CardHeader>
-          <CardContent className="flex items-center justify-center">
-            {loading ? <Skeleton className="h-[300px] w-full"/> :
-             <ChartContainer config={{}} className="h-[300px] w-full">
+          <CardContent className="flex items-center justify-center pb-4">
+            {loading ? <Skeleton className="h-[280px] w-full"/> :
+             <ChartContainer config={{}} className="h-[280px] w-full">
                 <PieChart>
                     <RechartsTooltip content={<ChartTooltipContent hideLabel />} />
                     <Pie data={pieData} dataKey="value" nameKey="name" innerRadius={60} outerRadius={80} paddingAngle={5} startAngle={90} endAngle={450}>
@@ -177,20 +263,22 @@ export default function DashboardPage() {
         </Card>
       </div>
       
+      {/* Recent Signals Table */}
       <Card>
         <CardHeader>
           <CardTitle>Recent Signals</CardTitle>
           <CardDescription>The most recent signals from your tracked wallets.</CardDescription>
         </CardHeader>
-        <CardContent>
-          <Table>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Pair</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Wallets</TableHead>
-                <TableHead>PnL</TableHead>
-                <TableHead>Status</TableHead>
+                <TableHead className="w-[100px]">Pair</TableHead>
+                <TableHead className="w-[80px]">Type</TableHead>
+                <TableHead className="w-[80px] text-center">Wallets</TableHead>
+                <TableHead className="w-[100px] text-right">PnL</TableHead>
+                <TableHead className="w-[120px]">Status</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -217,9 +305,12 @@ export default function DashboardPage() {
                         {signal.type}
                       </Badge>
                     </TableCell>
-                     <TableCell>{signal.contributingWallets}</TableCell>
-                    <TableCell className={signal.pnl >= 0 ? 'text-green-600' : 'text-destructive'}>
-                      ${signal.pnl.toFixed(2)}
+                     <TableCell className="text-center">{signal.contributingWallets}</TableCell>
+                    <TableCell className={cn(
+                      "text-right font-mono",
+                      signal.pnl >= 0 ? 'text-green-600' : 'text-destructive'
+                    )}>
+                      {signal.pnl >= 0 ? '+' : ''}${signal.pnl.toFixed(2)}
                     </TableCell>
                     <TableCell>
                       {getStatusBadge(signal.status)}
@@ -228,7 +319,8 @@ export default function DashboardPage() {
                 ))
               )}
             </TableBody>
-          </Table>
+            </Table>
+          </div>
         </CardContent>
       </Card>
     </div>

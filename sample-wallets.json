@@ -1,0 +1,35 @@
+[
+  {
+    "address": "0x742d35Cc6bf8f6F4e3aDf60f81272D8287df4F7f",
+    "label": "Smart Trader #1",
+    "totalPnl": 12500.75,
+    "totalTrades": 45,
+    "winningTrades": 32,
+    "isActive": true,
+    "cooldowns": {},
+    "tags": ["DeFi", "High Volume"],
+    "dateAdded": "2024-01-15T10:30:00Z"
+  },
+  {
+    "address": "0x8ba1f109551bD432803012645Hac136c22C57154",
+    "label": "Pro Whale #2",
+    "totalPnl": 8750.25,
+    "totalTrades": 28,
+    "winningTrades": 22,
+    "isActive": true,
+    "cooldowns": {},
+    "tags": ["Whale", "Conservative"],
+    "dateAdded": "2024-02-01T14:20:00Z"
+  },
+  {
+    "address": "0x3fD8B0B56e84a6B37aD28b346F1F7b1D2f1A4C9E",
+    "label": "Arbitrage Master",
+    "totalPnl": 15200.10,
+    "totalTrades": 67,
+    "winningTrades": 48,
+    "isActive": true,
+    "cooldowns": {},
+    "tags": ["Arbitrage", "High Frequency"],
+    "dateAdded": "2024-01-28T09:15:00Z"
+  }
+]

@@ -51,9 +51,9 @@
   {
     "address": "0x8e80c4b533dd977cf716b5c24fd9223129272804",
     "addedOn": "2025-08-22T14:01:53.530Z",
-    "totalPnl": 254096.98346255178,
-    "totalTrades": 54,
-    "winningTrades": 8,
+    "totalPnl": 266592.2462535518,
+    "totalTrades": 59,
+    "winningTrades": 13,
     "cooldowns": {
       "ETH": "2025-08-26T21:56:10.505Z",
       "SOL": "2025-08-28T22:15:46.687Z",
@@ -142,9 +142,9 @@
   {
     "address": "0xecb63caa47c7c4e77f60f1ce858cf28dc2b82b00",
     "addedOn": "2025-08-22T14:25:30.937Z",
-    "totalPnl": -86101.73032652511,
-    "totalTrades": 517,
-    "winningTrades": 26,
+    "totalPnl": -60395.51674652505,
+    "totalTrades": 668,
+    "winningTrades": 177,
     "cooldowns": {
       "SOL": "2025-08-28T22:15:46.687Z",
       "AAVE": "2025-08-24T20:32:12.634Z",
@@ -259,9 +259,9 @@
   {
     "address": "0xe92ea8999ad285f887abc3fa3ff8fde8ecf559cb",
     "addedOn": "2025-08-27T11:49:04.468Z",
-    "totalPnl": 0,
-    "totalTrades": 0,
-    "winningTrades": 0,
+    "totalPnl": 3611.5638000000035,
+    "totalTrades": 8,
+    "winningTrades": 8,
     "cooldowns": {
       "SOL": "2025-08-28T22:15:46.687Z"
     },
@@ -288,9 +288,9 @@
   {
     "address": "0x27c9fa86c91b84ddfa15de58c482ff662498d65d",
     "addedOn": "2025-08-27T11:51:54.565Z",
-    "totalPnl": -26.475295999999954,
-    "totalTrades": 1,
-    "winningTrades": 0,
+    "totalPnl": 123.54350800000017,
+    "totalTrades": 4,
+    "winningTrades": 3,
     "cooldowns": {
       "SOL": "2025-08-28T22:15:46.687Z"
     },
