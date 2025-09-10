@@ -1,6 +1,9 @@
 
 'use server';
 
+// NOTE: This module is used by both Next.js server actions and the PM2 background worker.
+// Keep logic side-effect free and file-paths relative to process.cwd().
+
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { getTrackedWalletsWithCooldown, readWallets, writeWallets, updateWalletCooldowns } from "../wallets/actions";

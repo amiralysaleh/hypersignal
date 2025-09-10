@@ -40,7 +40,7 @@ export default function DashboardPage() {
         setLoading(false);
       }
     };
-    const interval = setInterval(fetchData, 30000); // Refresh every 30 seconds
+    const interval = setInterval(fetchData, 15000); // Refresh every 15 seconds for fresher UI
     fetchData();
 
     return () => clearInterval(interval);
@@ -82,7 +82,7 @@ export default function DashboardPage() {
     }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6 container mx-auto px-2 sm:px-4">
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatsCard 
           title="Total Unrealized ROI" 

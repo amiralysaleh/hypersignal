@@ -2,8 +2,8 @@ module.exports = {
   apps: [
     {
       name: 'hypersignal-worker',
-      script: 'node',
-      args: '.next/standalone/src/backend/worker.js',
+      script: 'node_modules/.bin/tsx',
+      args: 'src/backend/worker.ts',
       cwd: __dirname,
       env: {
         NODE_ENV: 'production'

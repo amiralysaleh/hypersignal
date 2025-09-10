@@ -10,7 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { getSignals, Signal, deleteSignal, detectAndSaveSignals, updateSignalPrices } from './actions';
+import { getSignals, Signal, deleteSignal } from './actions';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { ArrowDown, ArrowUp, ChevronDown, Clock, DollarSign, Layers, Search, Target, Trash2, TrendingUp, Users } from 'lucide-react';
@@ -192,7 +192,7 @@ const SignalCard = ({ signal, onDelete }: { signal: Signal; onDelete: () => void
 export default function SignalsPage() {
   const [signals, setSignals] = React.useState<Signal[]>([]);
   const [loading, setLoading] = React.useState(true);
-  const [isDetecting, setIsDetecting] = React.useState(false);
+  // detection handled by background worker
   const [allPairs, setAllPairs] = React.useState<string[]>([]);
   
   // Filter state
@@ -215,7 +215,7 @@ export default function SignalsPage() {
   const fetchInitialSignals = React.useCallback(async () => {
     setLoading(true);
     try {
-        await detectAndSaveSignals(); // Run detection on first load
+        // Detection runs on the server; just fetch current snapshot
         await refetchSignals();
     } catch (error) {
         console.error("Failed to fetch initial signals", error);
@@ -224,40 +224,25 @@ export default function SignalsPage() {
     }
   }, [refetchSignals]);
 
-  const runDetection = React.useCallback(async () => {
-      if (isDetecting) return;
-      setIsDetecting(true);
-      try {
-          await detectAndSaveSignals();
-          await refetchSignals();
-      } catch (error) {
-          console.error("Failed to detect new signals", error);
-      } finally {
-          setIsDetecting(false);
-      }
-  }, [isDetecting, refetchSignals]);
+  // no-op: background detection is done by the worker
 
-  const updatePrices = React.useCallback(async () => {
-    if (document.hidden) return; // Don't update if the tab is not visible
+  const pollSignals = React.useCallback(async () => {
+    if (typeof document !== 'undefined' && document.hidden) return;
     try {
-        const updatedSignals = await updateSignalPrices();
-        if (updatedSignals.length > 0) {
-            setSignals(updatedSignals);
-        }
+      const latest = await getSignals();
+      setSignals(latest);
     } catch (error) {
-        console.error("Failed to update signal prices", error);
+      console.error("Failed to refresh signals", error);
     }
   }, []);
 
   React.useEffect(() => {
     fetchInitialSignals();
-    // Set up intervals
-    const detectionInterval = setInterval(runDetection, 60000); // Detect every 60 seconds
-    const priceUpdateInterval = setInterval(updatePrices, 15000); // Update prices every 15 seconds
+    // Set up polling to refresh UI from backend state
+    const pollInterval = setInterval(pollSignals, 15000);
 
     return () => {
-        clearInterval(detectionInterval);
-        clearInterval(priceUpdateInterval);
+        clearInterval(pollInterval);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

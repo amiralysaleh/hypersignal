@@ -18,8 +18,8 @@ export default function DashboardLayout({
 }) {
   return (
     <SidebarProvider>
-      <Sidebar side="left" variant="floating" collapsible="icon">
-        <SidebarHeader className="p-4">
+      <Sidebar side="left" variant="floating" collapsible="icon" className="backdrop-blur supports-[backdrop-filter]:bg-background/70 border-r">
+        <SidebarHeader className="p-4 border-b">
           <Logo />
         </SidebarHeader>
         <SidebarContent>
