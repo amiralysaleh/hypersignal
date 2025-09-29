@@ -18,7 +18,7 @@ import { cn } from '@/lib/utils';
 type WalletData = {
   pnl: string;
   roi: string;
-  positions: any[];
+  positions?: any[];
 };
 
 export default function ExplorerPage() {
@@ -173,7 +173,7 @@ export default function ExplorerPage() {
                     <CardDescription>All currently open positions for this wallet.</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    {walletData.positions.length > 0 ? (
+                    {(walletData.positions?.length ?? 0) > 0 ? (
                        <Table>
                         <TableHeader>
                             <TableRow>
@@ -185,7 +185,7 @@ export default function ExplorerPage() {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {walletData.positions.map((pos) => {
+                            {(walletData.positions ?? []).map((pos) => {
                                 const details = pos.position;
                                 const size = parseFloat(details.szi);
                                 const isLong = size > 0;
