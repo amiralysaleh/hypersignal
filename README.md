@@ -32,6 +32,19 @@ DETECTION_INTERVAL_MS=120000 PRICE_REFRESH_INTERVAL_MS=60000 npm run worker
 
 For production deployments run the worker alongside the Next.js server. A typical configuration is to keep the worker alive with a process manager such as `pm2`, Docker, or a systemd service.
 
+### Avoiding Hyperliquid rate limits
+
+The worker spaces Hyperliquid API calls so coordinated trading signals continue to flow even when the dashboard is closed. You can fine-tune that behaviour with environment variables if you hit remote rate limits:
+
+```bash
+# Ensure at least one request every 1.5 seconds and cap retry backoff at 2 minutes
+HYPERLIQUID_MIN_REQUEST_INTERVAL_MS=1500 \
+USER_FILLS_INITIAL_BACKOFF_MS=2000 \
+USER_FILLS_MAX_BACKOFF_MS=120000 npm run worker
+```
+
+When the API responds with HTTP 429 the worker retries with exponential backoff and logs the event, so no signals are lost—the UI continues to receive up-to-date data via the REST endpoints as soon as the retry succeeds.
+
 ## Project structure
 
 - `src/app/(dashboard)/**` – Dashboard pages and the server actions that power them.

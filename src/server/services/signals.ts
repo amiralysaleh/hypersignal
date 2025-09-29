@@ -3,6 +3,51 @@ import { getTrackedWalletsWithCooldown, readWallets, updateWalletCooldowns, writ
 import { getSettings, Settings } from './settings';
 import { log } from './logs';
 
+const HYPERLIQUID_MIN_REQUEST_INTERVAL_MS = Math.max(
+  0,
+  Number(process.env.HYPERLIQUID_MIN_REQUEST_INTERVAL_MS ?? 750)
+);
+const USER_FILLS_MAX_RETRIES = Math.max(1, Number(process.env.USER_FILLS_MAX_RETRIES ?? 5));
+const USER_FILLS_INITIAL_BACKOFF_MS = Math.max(
+  250,
+  Number(process.env.USER_FILLS_INITIAL_BACKOFF_MS ?? 1000)
+);
+const USER_FILLS_MAX_BACKOFF_MS = Math.max(
+  USER_FILLS_INITIAL_BACKOFF_MS,
+  Number(process.env.USER_FILLS_MAX_BACKOFF_MS ?? 60_000)
+);
+
+const hyperliquidBaseUrl = 'https://api.hyperliquid.xyz/info';
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+let hyperliquidQueue: Promise<void> = Promise.resolve();
+let lastHyperliquidRequestTimestamp = 0;
+
+async function scheduleHyperliquidRequest<T>(task: () => Promise<T>): Promise<T> {
+  const run = hyperliquidQueue.then(async () => {
+    const now = Date.now();
+    const elapsed = now - lastHyperliquidRequestTimestamp;
+    const wait = Math.max(0, HYPERLIQUID_MIN_REQUEST_INTERVAL_MS - elapsed);
+    if (wait > 0) {
+      await sleep(wait);
+    }
+
+    try {
+      return await task();
+    } finally {
+      lastHyperliquidRequestTimestamp = Date.now();
+    }
+  });
+
+  hyperliquidQueue = run.then(
+    () => undefined,
+    () => undefined
+  );
+
+  return run;
+}
+
 const SIGNALS_FILE_PATH = 'signals.json';
 
 export interface Signal {
@@ -38,19 +83,29 @@ async function writeSignals(signals: Signal[]): Promise<void> {
 
 async function getMarkPrice(coin: string): Promise<string> {
   try {
-    const response = await fetch('https://api.hyperliquid.xyz/info', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'allMids' }),
+    const { response, body } = await scheduleHyperliquidRequest(async () => {
+      const response = await fetch(hyperliquidBaseUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'allMids' }),
+      });
+
+      let body: any = null;
+      try {
+        body = await response.json();
+      } catch (error) {
+        body = null;
+      }
+
+      return { response, body };
     });
 
-    if (!response.ok) {
+    if (!response.ok || !body) {
       await log({ level: 'WARN', message: `Failed to fetch mark price for ${coin}`, context: { status: response.status } });
       return '0.00';
     }
 
-    const data = await response.json();
-    return data[coin] ?? '0.00';
+    return body[coin] ?? '0.00';
   } catch (error: any) {
     await log({ level: 'ERROR', message: `Failed to fetch mark price for ${coin}`, context: { error: error.message } });
     return '0.00';
@@ -58,23 +113,74 @@ async function getMarkPrice(coin: string): Promise<string> {
 }
 
 async function getUserFills(address: string): Promise<any[]> {
-  try {
-    const response = await fetch('https://api.hyperliquid.xyz/info', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'userFills', user: address }),
-    });
+  let backoff = USER_FILLS_INITIAL_BACKOFF_MS;
 
-    if (!response.ok) {
-      await log({ level: 'WARN', message: `API call for userFills failed for ${address}`, context: { status: response.status } });
+  for (let attempt = 1; attempt <= USER_FILLS_MAX_RETRIES; attempt++) {
+    try {
+      const { response, body } = await scheduleHyperliquidRequest(async () => {
+        const response = await fetch(hyperliquidBaseUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'userFills', user: address }),
+        });
+
+        let body: any = null;
+        try {
+          body = await response.json();
+        } catch (error) {
+          body = null;
+        }
+
+        return { response, body };
+      });
+
+      if (response.ok) {
+        if (Array.isArray(body)) {
+          return body;
+        }
+
+        return body ?? [];
+      }
+
+      if (response.status === 429) {
+        await log({
+          level: 'WARN',
+          message: `API call for userFills hit rate limit for ${address}`,
+          context: { attempt, status: response.status },
+        });
+        await sleep(backoff);
+        backoff = Math.min(backoff * 2, USER_FILLS_MAX_BACKOFF_MS);
+        continue;
+      }
+
+      await log({
+        level: 'WARN',
+        message: `API call for userFills failed for ${address}`,
+        context: { status: response.status, attempt },
+      });
       return [];
-    }
+    } catch (error: any) {
+      const message = error?.message ?? 'Unknown error';
+      if (attempt >= USER_FILLS_MAX_RETRIES) {
+        await log({
+          level: 'ERROR',
+          message: `Failed to fetch user fills for ${address}`,
+          context: { error: message, attempt },
+        });
+        break;
+      }
 
-    return await response.json();
-  } catch (error: any) {
-    await log({ level: 'ERROR', message: `Failed to fetch user fills for ${address}`, context: { error: error.message } });
-    return [];
+      await log({
+        level: 'WARN',
+        message: `Retrying user fills request for ${address}`,
+        context: { error: message, attempt },
+      });
+      await sleep(backoff);
+      backoff = Math.min(backoff * 2, USER_FILLS_MAX_BACKOFF_MS);
+    }
   }
+
+  return [];
 }
 
 async function sendTelegramMessage(signal: Signal, settings: Settings) {
