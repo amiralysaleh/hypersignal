@@ -9,7 +9,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { useEffect, useState, useTransition } from 'react';
-import { getSettings, saveSettings, Settings } from './actions';
+import type { Settings } from '@/server/services/settings';
+import { requestJson } from '@/lib/client/request';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const profiles = {
@@ -44,7 +45,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     startTransition(async () => {
-      const currentSettings = await getSettings();
+      const currentSettings = await requestJson<Settings>('/api/settings');
       setSettings(currentSettings);
     });
   }, []);
@@ -79,7 +80,14 @@ export default function SettingsPage() {
     e.preventDefault();
     startTransition(async () => {
       try {
-        await saveSettings(settings as Settings);
+        await requestJson<{ success: boolean }>(
+          '/api/settings',
+          {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings as Settings),
+          }
+        );
         toast({
           title: 'Success',
           description: 'Settings saved successfully.',

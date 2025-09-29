@@ -10,7 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { getSignals, Signal, deleteSignal, detectAndSaveSignals, updateSignalPrices } from './actions';
+import type { Signal } from '@/server/services/signals';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { ArrowDown, ArrowUp, ChevronDown, Clock, DollarSign, Layers, Search, Target, Trash2, TrendingUp, Users } from 'lucide-react';
@@ -20,6 +20,13 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
+import { requestJson } from '@/lib/client/request';
+
+const listSignals = () => requestJson<Signal[]>('/api/signals');
+const runDetectionApi = () => requestJson<Signal[]>('/api/signals/detect', { method: 'POST' });
+const updateSignalPricesApi = () => requestJson<Signal[]>('/api/signals/update-prices', { method: 'POST' });
+const deleteSignalApi = (id: string) =>
+  requestJson<{ success: boolean }>(`/api/signals/${encodeURIComponent(id)}`, { method: 'DELETE' });
 
 const SignalCard = ({ signal, onDelete }: { signal: Signal; onDelete: () => void; }) => {
     const isProfitable = parseFloat(signal.pnl) >= 0;
@@ -31,7 +38,7 @@ const SignalCard = ({ signal, onDelete }: { signal: Signal; onDelete: () => void
             return;
         }
         try {
-            await deleteSignal(signal.id);
+            await deleteSignalApi(signal.id);
             toast({
                 title: 'Success',
                 description: 'Signal deleted successfully.',
@@ -203,7 +210,7 @@ export default function SignalsPage() {
 
   const refetchSignals = React.useCallback(async () => {
     try {
-        const fetchedSignals = await getSignals();
+        const fetchedSignals = await listSignals();
         setSignals(fetchedSignals);
         const uniquePairs = Array.from(new Set(fetchedSignals.map(s => s.pair)));
         setAllPairs(uniquePairs);
@@ -215,20 +222,22 @@ export default function SignalsPage() {
   const fetchInitialSignals = React.useCallback(async () => {
     setLoading(true);
     try {
-        await detectAndSaveSignals(); // Run detection on first load
-        await refetchSignals();
+        const detectedSignals = await runDetectionApi();
+        setSignals(detectedSignals);
+        const uniquePairs = Array.from(new Set(detectedSignals.map(s => s.pair)));
+        setAllPairs(uniquePairs);
     } catch (error) {
         console.error("Failed to fetch initial signals", error);
     } finally {
         setLoading(false);
     }
-  }, [refetchSignals]);
+  }, []);
 
   const runDetection = React.useCallback(async () => {
       if (isDetecting) return;
       setIsDetecting(true);
       try {
-          await detectAndSaveSignals();
+          await runDetectionApi();
           await refetchSignals();
       } catch (error) {
           console.error("Failed to detect new signals", error);
@@ -237,13 +246,13 @@ export default function SignalsPage() {
       }
   }, [isDetecting, refetchSignals]);
 
-  const updatePrices = React.useCallback(async () => {
+  const refreshPrices = React.useCallback(async () => {
     if (document.hidden) return; // Don't update if the tab is not visible
     try {
-        const updatedSignals = await updateSignalPrices();
-        if (updatedSignals.length > 0) {
-            setSignals(updatedSignals);
-        }
+        const updatedSignals = await updateSignalPricesApi();
+        setSignals(updatedSignals);
+        const uniquePairs = Array.from(new Set(updatedSignals.map(s => s.pair)));
+        setAllPairs(uniquePairs);
     } catch (error) {
         console.error("Failed to update signal prices", error);
     }
@@ -253,7 +262,7 @@ export default function SignalsPage() {
     fetchInitialSignals();
     // Set up intervals
     const detectionInterval = setInterval(runDetection, 60000); // Detect every 60 seconds
-    const priceUpdateInterval = setInterval(updatePrices, 15000); // Update prices every 15 seconds
+    const priceUpdateInterval = setInterval(refreshPrices, 15000); // Update prices every 15 seconds
 
     return () => {
         clearInterval(detectionInterval);

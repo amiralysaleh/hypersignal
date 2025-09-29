@@ -7,7 +7,8 @@ import { Bar, BarChart, CartesianGrid, Pie, PieChart, XAxis, YAxis, Tooltip as R
 import { Activity, CheckCircle, Signal, Users, TrendingUp, XCircle, Clock } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { getDashboardData, DashboardData } from './actions';
+import type { DashboardData } from '@/server/services/dashboard';
+import { requestJson } from '@/lib/client/request';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
@@ -32,7 +33,7 @@ export default function DashboardPage() {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const dashboardData = await getDashboardData();
+        const dashboardData = await requestJson<DashboardData>('/api/dashboard');
         setData(dashboardData);
       } catch (error) {
         console.error("Failed to fetch dashboard data", error);

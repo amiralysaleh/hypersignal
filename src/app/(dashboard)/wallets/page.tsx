@@ -11,7 +11,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { getWallets, addWallet, deleteWallet, Wallet, toggleWalletFavorite } from './actions';
+import type { Wallet } from '@/server/services/wallets';
+import { requestJson } from '@/lib/client/request';
 import { format } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
@@ -27,7 +28,7 @@ export default function WalletsPage() {
   const fetchWallets = React.useCallback(async () => {
     try {
       setLoading(true);
-      const fetchedWallets = await getWallets();
+      const fetchedWallets = await requestJson<Wallet[]>('/api/wallets');
       setWallets(fetchedWallets);
     } catch (error) {
       toast({
@@ -56,7 +57,11 @@ export default function WalletsPage() {
       return;
     }
     try {
-      const newWallet = await addWallet(newAddress);
+      const newWallet = await requestJson<Wallet>('/api/wallets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: newAddress }),
+      });
       setWallets((prev) => [...prev, newWallet]);
       setNewAddress('');
       setOpen(false);
@@ -78,7 +83,7 @@ export default function WalletsPage() {
       return;
     }
     try {
-      await deleteWallet(address);
+      await requestJson<{ success: boolean }>(`/api/wallets/${encodeURIComponent(address)}`, { method: 'DELETE' });
       setWallets((prev) => prev.filter((w) => w.address !== address));
       toast({
         title: 'Success',
@@ -95,7 +100,7 @@ export default function WalletsPage() {
   
   const handleToggleFavorite = async (address: string) => {
     try {
-        const updatedWallet = await toggleWalletFavorite(address);
+        const updatedWallet = await requestJson<Wallet>(`/api/wallets/${encodeURIComponent(address)}/favorite`, { method: 'POST' });
         setWallets(prev => 
             prev.map(w => w.address === address ? updatedWallet : w)
         );

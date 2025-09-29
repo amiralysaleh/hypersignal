@@ -1,7 +1,7 @@
 import 'dotenv/config';
 
-import { detectAndSaveSignals, updateSignalPrices } from '../src/app/(dashboard)/signals/actions';
-import { log } from '../src/app/(dashboard)/logs/actions';
+import { detectAndSaveSignals, updateSignalPrices } from '../src/server/services/signals';
+import { log } from '../src/server/services/logs';
 
 const DEFAULT_DETECTION_INTERVAL_MS = 60_000;
 const DEFAULT_PRICE_REFRESH_INTERVAL_MS = 30_000;
