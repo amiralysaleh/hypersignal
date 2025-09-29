@@ -5,7 +5,7 @@ import { log } from './logs';
 
 const HYPERLIQUID_MIN_REQUEST_INTERVAL_MS = Math.max(
   0,
-  Number(process.env.HYPERLIQUID_MIN_REQUEST_INTERVAL_MS ?? 750)
+  Number(process.env.HYPERLIQUID_MIN_REQUEST_INTERVAL_MS ?? 1_000)
 );
 const USER_FILLS_MAX_RETRIES = Math.max(1, Number(process.env.USER_FILLS_MAX_RETRIES ?? 5));
 const USER_FILLS_INITIAL_BACKOFF_MS = Math.max(
@@ -23,12 +23,24 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 let hyperliquidQueue: Promise<void> = Promise.resolve();
 let lastHyperliquidRequestTimestamp = 0;
+let nextHyperliquidAvailableAt = 0;
+
+function registerHyperliquidPenalty(delayMs: number) {
+  if (!Number.isFinite(delayMs) || delayMs <= 0) {
+    return;
+  }
+
+  nextHyperliquidAvailableAt = Math.max(nextHyperliquidAvailableAt, Date.now() + delayMs);
+}
 
 async function scheduleHyperliquidRequest<T>(task: () => Promise<T>): Promise<T> {
   const run = hyperliquidQueue.then(async () => {
     const now = Date.now();
-    const elapsed = now - lastHyperliquidRequestTimestamp;
-    const wait = Math.max(0, HYPERLIQUID_MIN_REQUEST_INTERVAL_MS - elapsed);
+    const earliestAllowed = Math.max(
+      nextHyperliquidAvailableAt,
+      lastHyperliquidRequestTimestamp + HYPERLIQUID_MIN_REQUEST_INTERVAL_MS
+    );
+    const wait = Math.max(0, earliestAllowed - now);
     if (wait > 0) {
       await sleep(wait);
     }
@@ -37,6 +49,10 @@ async function scheduleHyperliquidRequest<T>(task: () => Promise<T>): Promise<T>
       return await task();
     } finally {
       lastHyperliquidRequestTimestamp = Date.now();
+      nextHyperliquidAvailableAt = Math.max(
+        nextHyperliquidAvailableAt,
+        lastHyperliquidRequestTimestamp + HYPERLIQUID_MIN_REQUEST_INTERVAL_MS
+      );
     }
   });
 
@@ -101,7 +117,14 @@ async function getMarkPrice(coin: string): Promise<string> {
     });
 
     if (!response.ok || !body) {
-      await log({ level: 'WARN', message: `Failed to fetch mark price for ${coin}`, context: { status: response.status } });
+      if (response.status === 429) {
+        registerHyperliquidPenalty(USER_FILLS_INITIAL_BACKOFF_MS);
+      }
+      await log({
+        level: 'WARN',
+        message: `Failed to fetch mark price for ${coin}`,
+        context: { status: response.status, rateLimited: response.status === 429 },
+      });
       return '0.00';
     }
 
@@ -146,8 +169,9 @@ async function getUserFills(address: string): Promise<any[]> {
         await log({
           level: 'WARN',
           message: `API call for userFills hit rate limit for ${address}`,
-          context: { attempt, status: response.status },
+          context: { attempt, status: response.status, nextDelayMs: backoff },
         });
+        registerHyperliquidPenalty(backoff);
         await sleep(backoff);
         backoff = Math.min(backoff * 2, USER_FILLS_MAX_BACKOFF_MS);
         continue;
