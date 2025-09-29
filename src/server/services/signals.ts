@@ -311,7 +311,10 @@ export async function detectAndSaveSignals(): Promise<void> {
 }
 
 export async function getSignals(): Promise<Signal[]> {
-  return readSignals();
+  const signals = await readSignals();
+  return [...signals].sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  );
 }
 
 export async function deleteSignal(signalId: string): Promise<void> {

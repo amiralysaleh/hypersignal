@@ -13,7 +13,22 @@ import {
 import type { Signal } from '@/server/services/signals';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatDistanceToNow, parseISO } from 'date-fns';
-import { ArrowDown, ArrowUp, ChevronDown, Clock, DollarSign, Layers, Search, Target, Trash2, TrendingUp, Users } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  ChevronDown,
+  Clock,
+  DollarSign,
+  Layers,
+  Loader2,
+  RefreshCw,
+  Search,
+  Target,
+  Trash2,
+  TrendingUp,
+  Users,
+} from 'lucide-react';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
@@ -21,6 +36,7 @@ import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { requestJson } from '@/lib/client/request';
+import { Switch } from '@/components/ui/switch';
 
 const listSignals = () => requestJson<Signal[]>('/api/signals');
 const runDetectionApi = () => requestJson<Signal[]>('/api/signals/detect', { method: 'POST' });
@@ -28,7 +44,7 @@ const updateSignalPricesApi = () => requestJson<Signal[]>('/api/signals/update-p
 const deleteSignalApi = (id: string) =>
   requestJson<{ success: boolean }>(`/api/signals/${encodeURIComponent(id)}`, { method: 'DELETE' });
 
-const SignalCard = ({ signal, onDelete }: { signal: Signal; onDelete: () => void; }) => {
+const SignalCard = ({ signal, onDelete }: { signal: Signal; onDelete: () => Promise<void> | void; }) => {
     const isProfitable = parseFloat(signal.pnl) >= 0;
     const signalTime = parseISO(signal.timestamp);
     const { toast } = useToast();
@@ -43,7 +59,7 @@ const SignalCard = ({ signal, onDelete }: { signal: Signal; onDelete: () => void
                 title: 'Success',
                 description: 'Signal deleted successfully.',
             });
-            onDelete(); // This will trigger a refetch in the parent
+            await onDelete();
         } catch (error) {
              toast({
                 variant: 'destructive',
@@ -197,80 +213,171 @@ const SignalCard = ({ signal, onDelete }: { signal: Signal; onDelete: () => void
 }
 
 export default function SignalsPage() {
+  const { toast } = useToast();
   const [signals, setSignals] = React.useState<Signal[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [isDetecting, setIsDetecting] = React.useState(false);
+  const [isUpdatingPrices, setIsUpdatingPrices] = React.useState(false);
+  const [isRefreshing, setIsRefreshing] = React.useState(false);
+  const [autoRefresh, setAutoRefresh] = React.useState(true);
+  const [lastUpdated, setLastUpdated] = React.useState<Date | null>(null);
+  const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
   const [allPairs, setAllPairs] = React.useState<string[]>([]);
-  
+
   // Filter state
   const [searchQuery, setSearchQuery] = React.useState('');
   const [selectedPairs, setSelectedPairs] = React.useState<Set<string>>(new Set());
   const [selectedTypes, setSelectedTypes] = React.useState<Set<'LONG' | 'SHORT'>>(new Set(['LONG', 'SHORT']));
   const [selectedStatuses, setSelectedStatuses] = React.useState<Set<Signal['status']>>(new Set(['Open', 'TP', 'SL']));
 
-  const refetchSignals = React.useCallback(async () => {
-    try {
-        const fetchedSignals = await listSignals();
-        setSignals(fetchedSignals);
-        const uniquePairs = Array.from(new Set(fetchedSignals.map(s => s.pair)));
-        setAllPairs(uniquePairs);
-    } catch (error) {
-        console.error("Failed to refetch signals", error);
-    }
-  }, []);
-  
-  const fetchInitialSignals = React.useCallback(async () => {
-    setLoading(true);
-    try {
-        const detectedSignals = await runDetectionApi();
-        setSignals(detectedSignals);
-        const uniquePairs = Array.from(new Set(detectedSignals.map(s => s.pair)));
-        setAllPairs(uniquePairs);
-    } catch (error) {
-        console.error("Failed to fetch initial signals", error);
-    } finally {
-        setLoading(false);
-    }
-  }, []);
-
-  const runDetection = React.useCallback(async () => {
-      if (isDetecting) return;
-      setIsDetecting(true);
-      try {
-          await runDetectionApi();
-          await refetchSignals();
-      } catch (error) {
-          console.error("Failed to detect new signals", error);
-      } finally {
-          setIsDetecting(false);
+  const applySignals = React.useCallback((nextSignals: Signal[]) => {
+    setSignals(nextSignals);
+    const uniquePairs = Array.from(new Set(nextSignals.map((signal) => signal.pair))).sort();
+    setAllPairs(uniquePairs);
+    setSelectedPairs((prev) => {
+      const filtered = new Set(Array.from(prev).filter((pair) => uniquePairs.includes(pair)));
+      if (filtered.size === prev.size) {
+        let identical = true;
+        prev.forEach((pair) => {
+          if (!filtered.has(pair)) {
+            identical = false;
+          }
+        });
+        if (identical) {
+          return prev;
+        }
       }
-  }, [isDetecting, refetchSignals]);
-
-  const refreshPrices = React.useCallback(async () => {
-    if (document.hidden) return; // Don't update if the tab is not visible
-    try {
-        const updatedSignals = await updateSignalPricesApi();
-        setSignals(updatedSignals);
-        const uniquePairs = Array.from(new Set(updatedSignals.map(s => s.pair)));
-        setAllPairs(uniquePairs);
-    } catch (error) {
-        console.error("Failed to update signal prices", error);
-    }
+      return filtered;
+    });
+    setLastUpdated(new Date());
+    setErrorMessage(null);
   }, []);
+
+  const fetchSignals = React.useCallback(
+    async (options: { withLoader?: boolean; showToastOnError?: boolean } = {}) => {
+      const { withLoader = false, showToastOnError = false } = options;
+      if (withLoader) {
+        setLoading(true);
+      }
+      try {
+        const fetchedSignals = await listSignals();
+        applySignals(fetchedSignals);
+        return true;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to load signals.';
+        setErrorMessage(message);
+        if (showToastOnError) {
+          toast({
+            variant: 'destructive',
+            title: 'Unable to load signals',
+            description: message,
+          });
+        }
+        return false;
+      } finally {
+        if (withLoader) {
+          setLoading(false);
+        }
+      }
+    },
+    [applySignals, toast]
+  );
 
   React.useEffect(() => {
-    fetchInitialSignals();
-    // Set up intervals
-    const detectionInterval = setInterval(runDetection, 60000); // Detect every 60 seconds
-    const priceUpdateInterval = setInterval(refreshPrices, 15000); // Update prices every 15 seconds
+    void fetchSignals({ withLoader: true, showToastOnError: true });
+  }, [fetchSignals]);
 
-    return () => {
-        clearInterval(detectionInterval);
-        clearInterval(priceUpdateInterval);
+  React.useEffect(() => {
+    if (!autoRefresh) {
+      return undefined;
+    }
+    const interval = setInterval(() => {
+      if (!document.hidden) {
+        void fetchSignals();
+      }
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [autoRefresh, fetchSignals]);
+
+  React.useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        void fetchSignals();
+      }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [fetchSignals]);
 
+  const handleManualRefresh = React.useCallback(async () => {
+    if (isRefreshing) {
+      return;
+    }
+    setIsRefreshing(true);
+    const success = await fetchSignals({ showToastOnError: true });
+    if (success) {
+      toast({
+        title: 'Signals refreshed',
+        description: 'Latest data synced from the backend.',
+      });
+    }
+    setIsRefreshing(false);
+  }, [fetchSignals, isRefreshing, toast]);
+
+  const handleRunDetection = React.useCallback(async () => {
+    if (isDetecting) {
+      return;
+    }
+    setIsDetecting(true);
+    try {
+      const detectedSignals = await runDetectionApi();
+      applySignals(detectedSignals);
+      toast({
+        title: 'Detection completed',
+        description:
+          detectedSignals.length > 0
+            ? 'Signals updated with the latest detection run.'
+            : 'No new coordinated positions were detected.',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to detect new signals.';
+      toast({
+        variant: 'destructive',
+        title: 'Detection failed',
+        description: message,
+      });
+    } finally {
+      setIsDetecting(false);
+    }
+  }, [applySignals, isDetecting, toast]);
+
+  const handleSyncPrices = React.useCallback(async () => {
+    if (isUpdatingPrices) {
+      return;
+    }
+    setIsUpdatingPrices(true);
+    try {
+      const updatedSignals = await updateSignalPricesApi();
+      applySignals(updatedSignals);
+      toast({
+        title: 'Prices synced',
+        description: 'Open signal performance metrics were refreshed.',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to update signal prices.';
+      toast({
+        variant: 'destructive',
+        title: 'Price sync failed',
+        description: message,
+      });
+    } finally {
+      setIsUpdatingPrices(false);
+    }
+  }, [applySignals, isUpdatingPrices, toast]);
+
+  const handlePostMutation = React.useCallback(async () => {
+    await fetchSignals({ showToastOnError: true });
+  }, [fetchSignals]);
 
   const handlePairToggle = (pair: string) => {
     setSelectedPairs(prev => {
@@ -328,10 +435,16 @@ export default function SignalsPage() {
     }
     if (signals.length === 0) {
       return (
-        <div className="text-center text-muted-foreground py-10">
-            <p className="text-lg">No active signals found.</p>
-            <p>A signal is generated when at least 'N' tracked wallets open the same position within the last 'T' minutes.</p>
-             <p className='mt-2 text-sm'>Check your settings for the 'Min Wallet Count (N)' and 'Time Window (T)' values.</p>
+        <div className="text-center text-muted-foreground py-10 space-y-2">
+          <p className="text-lg">No active signals found.</p>
+          <p>
+            A signal is generated when at least 'N' tracked wallets open the same position within the last 'T' minutes.
+          </p>
+          <p className="text-sm">
+            Check your detection settings and ensure the background worker is running (
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">npm run worker</code>
+            ) so detection continues 24/7.
+          </p>
         </div>
       );
     }
@@ -346,7 +459,7 @@ export default function SignalsPage() {
     return (
         <div className="space-y-4">
             {filteredSignals.map((signal) => (
-                <SignalCard key={signal.id} signal={signal} onDelete={refetchSignals} />
+                <SignalCard key={signal.id} signal={signal} onDelete={handlePostMutation} />
             ))}
         </div>
     )
@@ -354,14 +467,91 @@ export default function SignalsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Active Signals</h1>
-        <p className="text-muted-foreground">
-            Live signals based on tracked wallet consensus. Data refreshes automatically.
-        </p>
+      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+        <div className="space-y-2">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Active Signals</h1>
+            <p className="text-muted-foreground">
+              Live signals based on tracked wallet consensus. Data refreshes automatically.
+            </p>
+          </div>
+          <div className="flex flex-col gap-1 text-sm text-muted-foreground">
+            {lastUpdated && (
+              <div className="flex items-center gap-2">
+                <Clock className="h-4 w-4" />
+                <span>Last updated {formatDistanceToNow(lastUpdated, { addSuffix: true })}</span>
+              </div>
+            )}
+            {signals.length === 0 && !loading && (
+              <span>
+                Ensure the background worker (
+                <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">npm run worker</code>
+                ) is running to capture new signals 24/7.
+              </span>
+            )}
+          </div>
+          {errorMessage && (
+            <div className="flex flex-wrap items-center gap-2 text-sm text-destructive">
+              <AlertTriangle className="h-4 w-4" />
+              <span>{errorMessage}</span>
+              <Button
+                variant="link"
+                className="h-auto p-0"
+                onClick={handleManualRefresh}
+                disabled={isRefreshing || loading}
+              >
+                Retry
+              </Button>
+            </div>
+          )}
+        </div>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full lg:w-auto">
+          <div className="flex items-center justify-between sm:justify-start gap-2 rounded-md border px-3 py-1.5 bg-background/60">
+            <span className="text-sm font-medium">Auto refresh</span>
+            <Switch
+              checked={autoRefresh}
+              onCheckedChange={(checked) => setAutoRefresh(Boolean(checked))}
+              aria-label="Toggle auto refresh"
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+            <Button
+              variant="outline"
+              onClick={handleManualRefresh}
+              disabled={loading || isRefreshing}
+            >
+              {isRefreshing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Refresh
+            </Button>
+            <Button onClick={handleRunDetection} disabled={isDetecting}>
+              {isDetecting ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Target className="mr-2 h-4 w-4" />
+              )}
+              Run Detection
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={handleSyncPrices}
+              disabled={isUpdatingPrices}
+            >
+              {isUpdatingPrices ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <DollarSign className="mr-2 h-4 w-4" />
+              )}
+              Sync Prices
+            </Button>
+          </div>
+        </div>
       </div>
 
-       <Card>
+      <Card>
         <CardHeader>
           <CardTitle>Filters</CardTitle>
         </CardHeader>
