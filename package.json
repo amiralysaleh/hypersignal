@@ -10,7 +10,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "worker": "tsx src/server/worker.ts"
+    "worker": "tsx scripts/worker.ts"
   },
   "dependencies": {
     "@genkit-ai/googleai": "^1.14.1",

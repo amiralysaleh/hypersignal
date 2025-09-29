@@ -20,7 +20,7 @@ export type GetWalletDataInput = z.infer<typeof GetWalletDataInputSchema>;
 const GetWalletDataOutputSchema = z.object({
   pnl: z.string(),
   roi: z.string(),
-  positions: z.any(),
+  positions: z.array(z.any()),
 });
 export type GetWalletDataOutput = z.infer<typeof GetWalletDataOutputSchema>;
 
