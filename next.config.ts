@@ -1,15 +1,15 @@
 import type { NextConfig } from 'next';
-import { nextOnPages } from '@cloudflare/next-on-pages/plugin';
 import withPWA from 'next-pwa';
+import { initOpenNextCloudflareForDev } from '@opennextjs/cloudflare';
 
-const pwaConfig = withPWA({
+const withConfiguredPWA = withPWA({
   dest: 'public',
   register: true,
   skipWaiting: true,
   disable: process.env.NODE_ENV === 'development',
 });
 
-const baseConfig: NextConfig = {
+const nextConfig: NextConfig = withConfiguredPWA({
   typescript: {
     ignoreBuildErrors: true,
   },
@@ -26,6 +26,10 @@ const baseConfig: NextConfig = {
       },
     ],
   },
-};
+});
 
-export default nextOnPages(pwaConfig(baseConfig));
+if (process.env.NODE_ENV === 'development') {
+  void initOpenNextCloudflareForDev();
+}
+
+export default nextConfig;
