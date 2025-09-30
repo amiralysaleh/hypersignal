@@ -16,7 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { getLogs, clearLogs, LogEntry } from './actions';
+import type { LogEntry } from '@/server/services/logs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { AlertCircle, CheckCircle, Info, Search, Trash2, TriangleAlert } from 'lucide-react';
@@ -26,6 +26,7 @@ import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { requestJson } from '@/lib/client/request';
 
 const levelConfig = {
     ERROR: { icon: AlertCircle, color: 'text-destructive', badgeVariant: 'destructive' },
@@ -42,7 +43,7 @@ export default function LogsPage() {
 
     const fetchLogs = React.useCallback(async () => {
         try {
-            const fetchedLogs = await getLogs();
+            const fetchedLogs = await requestJson<LogEntry[]>('/api/logs');
             setLogs(fetchedLogs);
         } catch (error) {
             toast({
@@ -64,7 +65,7 @@ export default function LogsPage() {
             return;
         }
         try {
-            await clearLogs();
+            await requestJson<{ success: boolean }>('/api/logs', { method: 'DELETE' });
             setLogs([]);
             toast({
                 title: 'Success',

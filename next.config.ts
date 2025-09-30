@@ -1,4 +1,5 @@
-import type {NextConfig} from 'next';
+import type { NextConfig } from 'next';
+import { nextOnPages } from '@cloudflare/next-on-pages/plugin';
 import withPWA from 'next-pwa';
 
 const pwaConfig = withPWA({
@@ -8,8 +9,7 @@ const pwaConfig = withPWA({
   disable: process.env.NODE_ENV === 'development',
 });
 
-const nextConfig: NextConfig = {
-  /* config options here */
+const baseConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
@@ -28,4 +28,4 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default pwaConfig(nextConfig);
+export default nextOnPages(pwaConfig(baseConfig));

@@ -20,7 +20,7 @@ export type GetWalletDataInput = z.infer<typeof GetWalletDataInputSchema>;
 const GetWalletDataOutputSchema = z.object({
   pnl: z.string(),
   roi: z.string(),
-  positions: z.any(),
+  positions: z.array(z.any()),
 });
 export type GetWalletDataOutput = z.infer<typeof GetWalletDataOutputSchema>;
 
@@ -49,9 +49,9 @@ const getWalletDataFlow = ai.defineFlow(
           throw new Error(`API call failed with status: ${response.status}`);
       }
 
-      const data = await response.json();
-      
-      const positions = data?.assetPositions ?? [];
+      const data = (await response.json().catch(() => null)) as Record<string, any> | null;
+
+      const positions: any[] = Array.isArray(data?.assetPositions) ? (data!.assetPositions as any[]) : [];
       
       let totalPnl = 0;
       let totalMargin = 0;

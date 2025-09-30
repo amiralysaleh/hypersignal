@@ -5,7 +5,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
-import { predictSignalSuccess, getWalletCorrelations, CorrelationGroup } from './actions';
+import type { CorrelationGroup, SuccessPredictionOutput } from '@/server/services/analytics';
+import { requestJson } from '@/lib/client/request';
 import { ShieldCheck, Bot, Users } from 'lucide-react';
 
 export default function FilteredSwPage() {
@@ -17,8 +18,8 @@ export default function FilteredSwPage() {
         try {
             setLoading(true);
             const [probData, corrData] = await Promise.all([
-                predictSignalSuccess(),
-                getWalletCorrelations(),
+                requestJson<SuccessPredictionOutput>('/api/analytics/predict'),
+                requestJson<{ groups: CorrelationGroup[] }>('/api/analytics/correlations'),
             ]);
             setSuccessProbability(probData.successProbability);
             setCorrelationGroups(corrData.groups);

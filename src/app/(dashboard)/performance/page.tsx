@@ -4,7 +4,8 @@ import * as React from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { getPerformanceData, WalletPerformance } from './actions';
+import type { WalletPerformance } from '@/server/services/performance';
+import { requestJson } from '@/lib/client/request';
 import { Skeleton } from '@/components/ui/skeleton';
 
 export default function PerformancePage() {
@@ -16,7 +17,7 @@ export default function PerformancePage() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const data = await getPerformanceData(timeframe);
+        const data = await requestJson<WalletPerformance[]>(`/api/performance?timeframe=${timeframe}`);
         setPerformanceData(data);
       } catch (error) {
         console.error("Failed to fetch performance data", error);
