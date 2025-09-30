@@ -44,10 +44,16 @@ async function getFirstFillTimestamp(address: string, coin: string): Promise<str
             body: JSON.stringify({ type: 'userFills', user: address }),
         });
         if (!response.ok) return new Date().toISOString();
-        const fills = await response.json();
+        const fills = (await response.json().catch(() => null)) as unknown;
+
+        if (!Array.isArray(fills)) {
+            return new Date().toISOString();
+        }
 
         // This is a simplified logic. A more robust solution would track position changes.
-        const coinFills = fills.filter((f: any) => f.coin === coin).sort((a: any, b: any) => a.time - b.time);
+        const coinFills = (fills as any[])
+            .filter((f: any) => f && f.coin === coin)
+            .sort((a: any, b: any) => (a?.time ?? 0) - (b?.time ?? 0));
         
         if (coinFills.length > 0) {
             // Find the most recent fill that likely opened the current position.
@@ -95,21 +101,25 @@ const findWalletsByCoinFlow = ai.defineFlow(
       const holdingPositions: WalletPosition[] = [];
       const coinUpperCase = input.coin.toUpperCase();
       
-      const statePromises = trackedAddresses.map(address => 
+      const statePromises = trackedAddresses.map((address) =>
         fetch('https://api.hyperliquid.xyz/info', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ type: 'clearinghouseState', user: address }),
-        }).then(res => res.json().catch(() => null)).then(data => ({address, data}))
+        })
+          .then((res) => res.json().catch(() => null))
+          .then((data) => ({ address, data: data as Record<string, any> | null }))
       );
 
       const results = await Promise.all(statePromises);
 
       const positionPromises = results.map(async ({ address, data }) => {
           if (!data) return null;
-          
-          const positions = data?.assetPositions ?? [];
-          const targetPosition = positions.find((pos: any) => pos?.position?.coin?.toUpperCase() === coinUpperCase && parseFloat(pos?.position?.szi) !== 0);
+
+          const positions = Array.isArray((data as any).assetPositions) ? (data as any).assetPositions : [];
+          const targetPosition = positions.find((pos: any) =>
+              pos?.position?.coin?.toUpperCase() === coinUpperCase && parseFloat(pos?.position?.szi ?? '0') !== 0
+          );
 
           if (targetPosition) {
               const posDetails = targetPosition.position;

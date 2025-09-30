@@ -12,7 +12,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const body = (await request.json()) as { address?: string };
     const { address } = body;
     if (!address || typeof address !== 'string') {
       return NextResponse.json({ error: 'Address is required' }, { status: 400 });

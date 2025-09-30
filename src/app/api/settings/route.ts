@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getSettings, saveSettings } from '@/server/services/settings';
+import { getSettings, saveSettings, type Settings } from '@/server/services/settings';
 
 export async function GET() {
   try {
@@ -12,7 +12,7 @@ export async function GET() {
 
 export async function PUT(request: Request) {
   try {
-    const newSettings = await request.json();
+    const newSettings = (await request.json()) as Settings;
     await saveSettings(newSettings);
     return NextResponse.json({ success: true });
   } catch (error: any) {

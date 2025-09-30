@@ -1,56 +1,100 @@
-# HyperSignal Dashboard
+# HyperSignal on Cloudflare
 
-This project is a Next.js dashboard that keeps track of Hyperliquid wallets, clusters fills into actionable trading signals, and keeps a rolling log of what the automation is doing.
+HyperSignal is a Next.js dashboard that monitors Hyperliquid wallets, clusters fills into actionable trading signals, and keeps a full audit trail of its automation. The application now runs entirely on Cloudflare's free tier:
 
-The application persists its state to JSON files at the project root (`signals.json`, `wallets.json`, `settings.json`, and `logs.json`). Every server action in the dashboard reads and writes through these files which makes it easy to understand and debug the system.
+- **Cloudflare Pages** serves the Next.js dashboard and API routes.
+- **Cloudflare D1** stores all persistent state (signals, wallets, settings, analytics, logs).
+- **Cloudflare Workers Cron** runs the background automation so detection continues 24/7 even when no browser is open.
 
 ## Prerequisites
 
-- Node.js 18 or newer (provides the built-in `fetch` API used by the worker)
+- Node.js 18+
 - npm 10+
+- A free Cloudflare account with access to Pages, Workers and D1
 
-## Available scripts
+## Local development
 
 ```bash
+npm install
 npm run dev      # Start the Next.js dashboard on http://localhost:9002
-npm run build    # Create a production build
-npm run start    # Serve the production build
-npm run worker   # Run the background worker that keeps signals in sync 24/7
+npm run typecheck
 ```
 
-The background worker imports the same server actions that power the dashboard UI. It periodically:
+When running locally the app still expects Cloudflare bindings. You can emulate them with `wrangler pages dev` once you have created the D1 database (see deployment walkthrough below).
 
-1. Calls `detectAndSaveSignals` to scan tracked wallets for new clustered positions.
-2. Calls `updateSignalPrices` to refresh PnL / ROI and close signals that have hit TP/SL.
-3. Writes detailed progress (and any errors) to `logs.json` so the dashboard can show a live audit trail.
+## Cloudflare deployment walkthrough
 
-By default the worker detects new signals every 60 seconds and refreshes prices every 30 seconds. You can override those defaults with environment variables:
+The following beginner friendly guide walks through every Cloudflare step. You only need the Cloudflare dashboard—no CLI knowledge is required beyond pasting commands that the UI provides.
+
+### 1. Prepare your repository
+
+1. Push this project to a GitHub repository (private or public).
+2. Ensure `migrations/0001_init.sql` is committed; Cloudflare will run it automatically when the D1 database is created.
+
+### 2. Create the D1 database
+
+1. Log in to [dash.cloudflare.com](https://dash.cloudflare.com) and pick your account.
+2. Open **Workers & Pages → D1** and click **Create**.
+3. Name the database `hypersignal` (or any name you prefer) and confirm.
+4. After creation, open the database details and note the **Database ID**—you will paste it into `wrangler.toml` later for local development. Cloudflare Pages automatically wires it in production, so no code changes are required.
+
+### 3. Connect GitHub to Cloudflare Pages
+
+1. Navigate to **Workers & Pages → Pages** and click **Create application**.
+2. Choose **Connect to Git** and select the repository that hosts HyperSignal.
+3. In the build configuration, set:
+   - **Framework preset:** `Next.js`
+   - **Build command:** `npx @cloudflare/next-on-pages build`
+   - **Build output directory:** `.vercel/output/static`
+   - **Root directory:** leave empty (project root)
+4. Add the following environment variables under **Build settings → Environment variables**:
+   - `NODE_VERSION = 18`
+   - `NPM_FLAGS = --legacy-peer-deps` (prevents strict install failures on the free tier)
+5. Save and start the first deploy. Cloudflare will install dependencies, build the Next.js project for the Pages runtime and ship the static assets plus API handlers.
+
+### 4. Bind the D1 database to the Pages project
+
+1. Inside the newly created Pages project, open **Settings → Functions**.
+2. Click **Add binding → D1 database** and choose the `hypersignal` database you created earlier.
+3. Set the binding name to `DB`. This matches the codebase and enables all API routes and server actions to talk to D1 automatically.
+
+### 5. Schedule the automation worker
+
+1. Still within your account, go to **Workers & Pages → Workers** and click **Create Worker**.
+2. Choose **Deploy** to generate an empty worker, then switch to the **Quick edit** view.
+3. Replace the default script with the contents of `cloudflare/worker.ts` and save.
+4. Under **Settings → Triggers** enable **Cron Triggers** and add the schedule `*/5 * * * *` (every five minutes) or adjust as needed.
+5. In **Settings → Bindings** add the same D1 database with the binding name `DB`.
+6. (Optional) Copy the worker URL and store it in a safe place—you can manually trigger a run with `curl -X POST https://<worker-subdomain>.workers.dev/run`.
+
+### 6. Verify the live dashboard
+
+1. Open your Pages deployment URL. The dashboard will call the bundled API routes (served from Cloudflare Pages functions) which talk to D1.
+2. Use the **Logs** tab to confirm the worker is writing entries every time it runs.
+3. Configure Telegram or additional wallets through the Settings page—the changes persist in D1, so every subsequent deploy reuses the same data.
+
+## Architecture overview
+
+- **Cloudflare-first persistence** – `src/server/storage/jsonStore.ts` now stores all structured JSON data in the D1 table `kv_store`, so every part of the app (UI, APIs, worker automation) shares the same durable backend.
+- **Automation as a Worker** – `cloudflare/worker.ts` executes the detection and price refresh loops on a schedule. It uses the same service layer as the dashboard and logs progress back into D1.
+- **API consumption from the UI** – Front-end pages call the REST endpoints served by Next.js on Cloudflare Pages. Because everything runs on the same origin you don’t need extra configuration—the dashboard simply polls `/api/**` routes.
+
+## Useful scripts
 
 ```bash
-DETECTION_INTERVAL_MS=120000 PRICE_REFRESH_INTERVAL_MS=60000 npm run worker
+npm run dev        # Local Next.js dev server (requires wrangler for D1 emulation)
+npm run build      # Production build (used by Cloudflare Pages)
+npm run start      # Serve the production build locally
+npm run typecheck  # Static type checks
 ```
 
-For production deployments run the worker alongside the Next.js server. A typical configuration is to keep the worker alive with a process manager such as `pm2`, Docker, or a systemd service.
+## Manual worker testing
 
-### Avoiding Hyperliquid rate limits
-
-The worker spaces Hyperliquid API calls so coordinated trading signals continue to flow even when the dashboard is closed. You can fine-tune that behaviour with environment variables if you hit remote rate limits:
+You can run the Cloudflare worker logic locally through Wrangler once you have configured your `wrangler.toml` with the database ID:
 
 ```bash
-# Ensure at least one request every 1.5 seconds and cap retry backoff at 2 minutes
-HYPERLIQUID_MIN_REQUEST_INTERVAL_MS=1500 \
-USER_FILLS_INITIAL_BACKOFF_MS=2000 \
-USER_FILLS_MAX_BACKOFF_MS=120000 npm run worker
+npx wrangler d1 migrations apply hypersignal --local
+npx wrangler dev --test-scheduled
 ```
 
-When the API responds with HTTP 429 the worker retries with exponential backoff and logs the event, so no signals are lost—the UI continues to receive up-to-date data via the REST endpoints as soon as the retry succeeds.
-
-## Project structure
-
-- `src/app/(dashboard)/**` – Dashboard pages and the server actions that power them.
-- `signals.json` – Persisted signals detected from the blockchain.
-- `wallets.json` – Wallet registry with stats and cooldown metadata.
-- `settings.json` – Operator configurable thresholds (minimum wallets, time window, TP/SL values, Telegram credentials, etc.).
-- `logs.json` – Rolling log file written by both the UI and the worker so you can diagnose issues quickly.
-
-Whenever you make manual edits to the JSON files make sure the contents stay valid – malformed JSON will be reported in the dashboard logs and the background worker will skip execution until the data is fixed.
+This spins up the worker, injects a temporary D1 database and executes the scheduled job so you can verify signal detection without deploying.

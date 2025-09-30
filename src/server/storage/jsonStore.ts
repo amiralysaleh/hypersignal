@@ -1,24 +1,44 @@
-import { promises as fs } from 'fs';
-import path from 'path';
+import { getCloudflareEnv } from './env';
+
+const TABLE_NAME = 'kv_store';
+const KEY_PREFIX = 'json:';
+
+async function ensureTable() {
+  const { DB } = getCloudflareEnv();
+  await DB.prepare(
+    `CREATE TABLE IF NOT EXISTS ${TABLE_NAME} (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )`
+  ).run();
+}
+
+async function ensureRow<T>(key: string, defaultValue: T) {
+  const { DB } = getCloudflareEnv();
+  await ensureTable();
+  await DB.prepare(`INSERT OR IGNORE INTO ${TABLE_NAME} (key, value) VALUES (?1, ?2)`).bind(key, JSON.stringify(defaultValue)).run();
+}
+
+function resolveKey(relativePath: string) {
+  return `${KEY_PREFIX}${relativePath}`;
+}
 
 export async function ensureFile<T>(relativePath: string, defaultValue: T): Promise<string> {
-  const filePath = path.resolve(process.cwd(), relativePath);
-  try {
-    await fs.access(filePath);
-  } catch (error: any) {
-    if (error?.code === 'ENOENT') {
-      await fs.mkdir(path.dirname(filePath), { recursive: true });
-      await fs.writeFile(filePath, JSON.stringify(defaultValue, null, 2));
-    } else {
-      throw error;
-    }
-  }
-  return filePath;
+  const key = resolveKey(relativePath);
+  await ensureRow(key, defaultValue);
+  return key;
 }
 
 export async function readJsonFile<T>(relativePath: string, defaultValue: T): Promise<T> {
-  const filePath = await ensureFile(relativePath, defaultValue);
-  const content = await fs.readFile(filePath, 'utf-8');
+  const key = await ensureFile(relativePath, defaultValue);
+  const { DB } = getCloudflareEnv();
+  const row = await DB.prepare(`SELECT value FROM ${TABLE_NAME} WHERE key = ?1`).bind(key).first<{ value: string }>();
+
+  if (!row || !row.value) {
+    return defaultValue;
+  }
+
+  const content = row.value;
   if (!content.trim()) {
     return defaultValue;
   }
@@ -31,16 +51,16 @@ export async function readJsonFile<T>(relativePath: string, defaultValue: T): Pr
     if (typeof defaultValue === 'object' && defaultValue !== null) {
       return { ...(defaultValue as object), ...(parsed as object) } as T;
     }
-    return parsed;
+    return parsed as T;
   } catch (error) {
-    // If the file is corrupted, reset it to the default value so the app can recover gracefully.
-    await fs.writeFile(filePath, JSON.stringify(defaultValue, null, 2));
+    await writeJsonFile(relativePath, defaultValue);
     return defaultValue;
   }
 }
 
 export async function writeJsonFile<T>(relativePath: string, data: T): Promise<void> {
-  const filePath = path.resolve(process.cwd(), relativePath);
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, JSON.stringify(data, null, 2));
+  const key = resolveKey(relativePath);
+  const { DB } = getCloudflareEnv();
+  await ensureTable();
+  await DB.prepare(`INSERT OR REPLACE INTO ${TABLE_NAME} (key, value) VALUES (?1, ?2)`).bind(key, JSON.stringify(data)).run();
 }

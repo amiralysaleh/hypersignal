@@ -250,8 +250,8 @@ ${signal.takeProfitTargets.map((tp, i) => `TP ${i + 1}: ${tp}`).join('\n')}
         }),
       });
 
-      const result = await response.json();
-      if (result.ok) {
+      const result = (await response.json().catch(() => null)) as { ok?: boolean } | null;
+      if (result?.ok) {
         await log({ level: 'INFO', message: `Telegram message sent to channel ${channelId} for signal ${signal.id}` });
       } else {
         await log({ level: 'ERROR', message: `Failed to send message to channel ${channelId} for signal ${signal.id}`, context: result });
