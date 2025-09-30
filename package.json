@@ -10,8 +10,13 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "cf:pages": "npx @cloudflare/next-on-pages build",
-    "cf:worker": "wrangler deploy"
+    "preview": "opennextjs-cloudflare build && node scripts/patch-opennext-worker.mjs && opennextjs-cloudflare preview",
+    "deploy": "opennextjs-cloudflare build && node scripts/patch-opennext-worker.mjs && opennextjs-cloudflare deploy",
+    "upload": "opennextjs-cloudflare build && node scripts/patch-opennext-worker.mjs && opennextjs-cloudflare upload",
+    "cf:typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "dependencies": {
     "@genkit-ai/googleai": "^1.14.1",
@@ -60,7 +65,7 @@
     "zod": "^3.24.2"
   },
   "devDependencies": {
-    "@cloudflare/next-on-pages": "^1.13.0",
+    "@opennextjs/cloudflare": "^1.7.4",
     "@cloudflare/workers-types": "^4.20241022.0",
     "@types/node": "^20",
     "@types/react": "^18",
@@ -70,6 +75,6 @@
     "tailwindcss": "^3.4.1",
     "tsx": "^4.19.2",
     "typescript": "^5",
-    "wrangler": "^3.89.0"
+    "wrangler": "^4.38.0"
   }
 }

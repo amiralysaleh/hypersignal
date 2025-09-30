@@ -1,6 +1,6 @@
-import { getRequestContext } from '@cloudflare/next-on-pages';
+import { getCloudflareContext } from '@opennextjs/cloudflare';
 
-interface CloudflareBindings {
+export interface CloudflareBindings extends CloudflareEnv {
   DB: D1Database;
 }
 
@@ -16,12 +16,12 @@ export function getCloudflareEnv(): CloudflareBindings {
   }
 
   try {
-    const context = getRequestContext();
+    const context = getCloudflareContext({ async: false });
     if (context?.env && 'DB' in context.env) {
       return context.env as CloudflareBindings;
     }
   } catch (error) {
-    // getRequestContext throws when invoked outside a request (e.g. during build time).
+    // getCloudflareContext throws when invoked outside a request (e.g. during build time).
   }
 
   if (typeof globalThis !== 'undefined' && (globalThis as any).__CLOUDFLARE_ENV__) {
@@ -29,6 +29,6 @@ export function getCloudflareEnv(): CloudflareBindings {
   }
 
   throw new Error(
-    'Cloudflare environment bindings are not available. Ensure this code runs inside a Next.js request handler on Pages or set the bindings via setCloudflareEnv().' 
+    'Cloudflare environment bindings are not available. Ensure this code runs inside a Cloudflare request handler or set the bindings via setCloudflareEnv().' 
   );
 }
