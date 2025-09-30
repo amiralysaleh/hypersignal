@@ -6,7 +6,7 @@
   "compatibility_flags": ["nodejs_compat"],
   "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
   "d1_databases": [
-    { "binding": "DB", "database_name": "hypersignal", "database_id": "2f9ff89a-b0eb-4a6c-9c87-f8e4d8b675c1" }
+    { "binding": "DB", "database_name": "hypersignal", "database_id": "a1346ba1-4968-413a-81d0-ba49779f635a" }
   ],
   "triggers": { "crons": ["*/5 * * * *"] }
 }
