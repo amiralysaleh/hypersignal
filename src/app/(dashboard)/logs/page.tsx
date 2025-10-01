@@ -22,7 +22,6 @@ import { formatDistanceToNow, parseISO } from 'date-fns';
 import { AlertCircle, CheckCircle, Info, Search, Trash2, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -103,39 +102,50 @@ export default function LogsPage() {
 
     return (
         <div className="flex flex-col gap-6">
-            <div className="flex items-center justify-between">
-                <div>
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div className="space-y-1">
                     <h1 className="text-2xl font-bold tracking-tight">System Logs</h1>
                     <p className="text-muted-foreground">
                         View system events and errors.
                     </p>
                 </div>
-                <Button variant="destructive" onClick={handleClearLogs}>
+                <Button
+                    variant="destructive"
+                    onClick={handleClearLogs}
+                    className="w-full md:w-auto"
+                >
                     <Trash2 className="mr-2 h-4 w-4" />
                     Clear Logs
                 </Button>
             </div>
-            
+
             <Card>
                 <CardHeader>
-                    <div className="flex flex-col sm:flex-row gap-4 justify-between">
-                         <CardTitle>Log Entries</CardTitle>
-                         <div className="flex gap-2">
-                             <div className="relative w-full sm:w-64">
-                              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                              <Input
-                                type="search"
-                                placeholder="Search logs..."
-                                className="pl-8"
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                              />
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="space-y-1">
+                            <CardTitle>Log Entries</CardTitle>
+                            <CardDescription>
+                                Filter and explore activity across services.
+                            </CardDescription>
+                        </div>
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+                            <div className="relative w-full sm:w-64">
+                                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                                <Input
+                                    type="search"
+                                    placeholder="Search logs..."
+                                    className="pl-8"
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                />
                             </div>
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                    <Button variant="outline">Level ({selectedLevels.size})</Button>
+                                    <Button variant="outline" className="justify-between">
+                                        Level ({selectedLevels.size})
+                                    </Button>
                                 </DropdownMenuTrigger>
-                                <DropdownMenuContent>
+                                <DropdownMenuContent align="end" className="w-48">
                                     <DropdownMenuLabel>Filter by Level</DropdownMenuLabel>
                                     <DropdownMenuSeparator />
                                     {Object.keys(levelConfig).map(level => (
@@ -149,63 +159,105 @@ export default function LogsPage() {
                                     ))}
                                 </DropdownMenuContent>
                             </DropdownMenu>
-                         </div>
+                        </div>
                     </div>
                 </CardHeader>
                 <CardContent>
-                    <Table>
-                        <TableHeader>
-                            <TableRow>
-                                <TableHead className="w-[100px]">Level</TableHead>
-                                <TableHead>Message</TableHead>
-                                <TableHead className="w-[200px]">Timestamp</TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                             {loading ? (
-                                [...Array(5)].map((_, i) => (
-                                    <TableRow key={i}>
-                                        <TableCell><Skeleton className="h-5 w-16" /></TableCell>
-                                        <TableCell><Skeleton className="h-5 w-full" /></TableCell>
-                                        <TableCell><Skeleton className="h-5 w-24" /></TableCell>
-                                    </TableRow>
-                                ))
-                            ) : filteredLogs.length === 0 ? (
+                    <div className="hidden md:block">
+                        <Table>
+                            <TableHeader>
                                 <TableRow>
-                                    <TableCell colSpan={3} className="text-center h-24">
-                                        {logs.length === 0 ? 'No logs recorded yet.' : 'No logs match your current filters.'}
-                                    </TableCell>
+                                    <TableHead className="w-[100px]">Level</TableHead>
+                                    <TableHead>Message</TableHead>
+                                    <TableHead className="w-[200px]">Timestamp</TableHead>
                                 </TableRow>
-                            ) : (
-                                filteredLogs.map((log, index) => {
-                                    const Icon = levelConfig[log.level]?.icon || Info;
-                                    const color = levelConfig[log.level]?.color || 'text-foreground';
-                                    const variant = levelConfig[log.level]?.badgeVariant as any || 'default';
-                                    return (
-                                        <TableRow key={index}>
-                                            <TableCell>
-                                                <Badge variant={variant} className="gap-1">
-                                                    <Icon className="h-3.5 w-3.5" />
-                                                    <span>{log.level}</span>
-                                                </Badge>
-                                            </TableCell>
-                                            <TableCell>
-                                                <p>{log.message}</p>
-                                                {log.context && (
-                                                    <pre className="mt-2 text-xs text-muted-foreground bg-muted p-2 rounded-md overflow-x-auto">
-                                                        {JSON.stringify(log.context, null, 2)}
-                                                    </pre>
-                                                )}
-                                            </TableCell>
-                                            <TableCell className="text-muted-foreground">
-                                                {formatDistanceToNow(parseISO(log.timestamp), { addSuffix: true })}
-                                            </TableCell>
+                            </TableHeader>
+                            <TableBody>
+                                {loading ? (
+                                    [...Array(5)].map((_, i) => (
+                                        <TableRow key={i}>
+                                            <TableCell><Skeleton className="h-5 w-16" /></TableCell>
+                                            <TableCell><Skeleton className="h-5 w-full" /></TableCell>
+                                            <TableCell><Skeleton className="h-5 w-24" /></TableCell>
                                         </TableRow>
-                                    )
-                                })
-                            )}
-                        </TableBody>
-                    </Table>
+                                    ))
+                                ) : filteredLogs.length === 0 ? (
+                                    <TableRow>
+                                        <TableCell colSpan={3} className="h-24 text-center">
+                                            {logs.length === 0 ? 'No logs recorded yet.' : 'No logs match your current filters.'}
+                                        </TableCell>
+                                    </TableRow>
+                                ) : (
+                                    filteredLogs.map((log, index) => {
+                                        const Icon = levelConfig[log.level]?.icon || Info;
+                                        const variant = levelConfig[log.level]?.badgeVariant as any || 'default';
+                                        return (
+                                            <TableRow key={index}>
+                                                <TableCell>
+                                                    <Badge variant={variant} className="gap-1">
+                                                        <Icon className="h-3.5 w-3.5" />
+                                                        <span>{log.level}</span>
+                                                    </Badge>
+                                                </TableCell>
+                                                <TableCell>
+                                                    <p>{log.message}</p>
+                                                    {log.context && (
+                                                        <pre className="mt-2 max-h-32 overflow-x-auto overflow-y-auto rounded-md bg-muted p-2 text-xs text-muted-foreground">
+                                                            {JSON.stringify(log.context, null, 2)}
+                                                        </pre>
+                                                    )}
+                                                </TableCell>
+                                                <TableCell className="text-muted-foreground">
+                                                    {formatDistanceToNow(parseISO(log.timestamp), { addSuffix: true })}
+                                                </TableCell>
+                                            </TableRow>
+                                        );
+                                    })
+                                )}
+                            </TableBody>
+                        </Table>
+                    </div>
+                    <div className="flex flex-col gap-3 md:hidden">
+                        {loading ? (
+                            [...Array(4)].map((_, i) => (
+                                <div key={i} className="rounded-2xl border border-border/60 bg-muted/60 p-4">
+                                    <Skeleton className="mb-2 h-4 w-24" />
+                                    <Skeleton className="h-4 w-full" />
+                                </div>
+                            ))
+                        ) : filteredLogs.length === 0 ? (
+                            <div className="rounded-2xl border border-dashed border-border/80 bg-background/60 p-6 text-center text-sm text-muted-foreground">
+                                {logs.length === 0 ? 'No logs recorded yet.' : 'No logs match your current filters.'}
+                            </div>
+                        ) : (
+                            filteredLogs.map((log, index) => {
+                                const Icon = levelConfig[log.level]?.icon || Info;
+                                const variant = levelConfig[log.level]?.badgeVariant as any || 'default';
+                                return (
+                                    <div
+                                        key={`mobile-${index}`}
+                                        className="rounded-2xl border border-border/60 bg-card/80 p-4 shadow-sm"
+                                    >
+                                        <div className="flex items-center justify-between gap-3">
+                                            <Badge variant={variant} className="gap-1">
+                                                <Icon className="h-3.5 w-3.5" />
+                                                <span>{log.level}</span>
+                                            </Badge>
+                                            <span className="text-xs text-muted-foreground">
+                                                {formatDistanceToNow(parseISO(log.timestamp), { addSuffix: true })}
+                                            </span>
+                                        </div>
+                                        <p className="mt-3 text-sm leading-relaxed">{log.message}</p>
+                                        {log.context && (
+                                            <pre className="mt-3 max-h-48 overflow-x-auto overflow-y-auto rounded-xl bg-muted/80 p-3 text-[11px] leading-snug text-muted-foreground">
+                                                {JSON.stringify(log.context, null, 2)}
+                                            </pre>
+                                        )}
+                                    </div>
+                                );
+                            })
+                        )}
+                    </div>
                 </CardContent>
             </Card>
         </div>

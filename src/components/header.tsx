@@ -22,10 +22,11 @@ export function Header() {
   };
   
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background/95 px-4 backdrop-blur sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6">
+    <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b border-border/70 bg-background/80 px-4 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/60 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6 sm:shadow-none">
       <SidebarTrigger className="sm:hidden" />
-      <div className="flex-1">
-        <h1 className="text-lg font-semibold">{getPageTitle(pathname)}</h1>
+      <div className="flex flex-1 flex-col">
+        <h1 className="text-lg font-semibold sm:text-xl">{getPageTitle(pathname)}</h1>
+        <span className="text-xs text-muted-foreground sm:hidden">Monitoring tools at a glance.</span>
       </div>
       <div className="flex items-center gap-4">
         <ThemeToggle />
