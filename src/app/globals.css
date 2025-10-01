@@ -86,6 +86,11 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply min-h-screen bg-background text-foreground antialiased;
+    background-image:
+      radial-gradient(120% 120% at 50% -10%, hsl(var(--primary) / 0.12), transparent 70%),
+      radial-gradient(120% 120% at 0% 100%, hsl(var(--chart-2) / 0.08), transparent 70%),
+      radial-gradient(160% 140% at 100% 100%, hsl(var(--chart-1) / 0.05), transparent 75%);
+    background-attachment: fixed;
   }
 }

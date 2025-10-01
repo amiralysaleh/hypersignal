@@ -11,7 +11,6 @@ import {
   Wallet,
   Compass,
   FileText,
-  BrainCircuit,
 } from 'lucide-react';
 import {
   SidebarMenu,
@@ -25,7 +24,6 @@ const navItems = [
   { href: '/wallets', label: 'Wallets', icon: Wallet },
   { href: '/performance', label: 'Performance', icon: BarChart2 },
   { href: '/explorer', label: 'Explorer', icon: Compass },
-  { href: '/filtered-sw', label: 'Predictor', icon: BrainCircuit },
   { href: '/settings', label: 'Settings', icon: Settings },
   { href: '/logs', label: 'Logs', icon: FileText },
 ];

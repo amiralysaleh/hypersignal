@@ -32,6 +32,7 @@ export type WalletPosition = z.infer<typeof WalletPositionSchema>;
 
 const FindWalletsByCoinOutputSchema = z.object({
     positions: z.array(WalletPositionSchema).describe('A list of wallets and their position details for the specified coin.'),
+    trackedWalletCount: z.number().describe('Total number of tracked wallets available for analysis.'),
 });
 export type FindWalletsByCoinOutput = z.infer<typeof FindWalletsByCoinOutputSchema>;
 
@@ -95,7 +96,7 @@ const findWalletsByCoinFlow = ai.defineFlow(
     try {
       const trackedAddresses = await getTrackedAddresses();
       if (trackedAddresses.length === 0) {
-        return { positions: [] };
+        return { positions: [], trackedWalletCount: 0 };
       }
 
       const holdingPositions: WalletPosition[] = [];
@@ -144,7 +145,10 @@ const findWalletsByCoinFlow = ai.defineFlow(
       });
 
       const resolvedPositions = await Promise.all(positionPromises);
-      return { positions: resolvedPositions.filter((p): p is WalletPosition => p !== null) };
+      return {
+        positions: resolvedPositions.filter((p): p is WalletPosition => p !== null),
+        trackedWalletCount: trackedAddresses.length,
+      };
 
     } catch(e: any) {
         await log({ level: 'ERROR', message: `Failed to execute findWalletsByCoin flow for coin: ${input.coin}`, context: { error: e.message, stack: e.stack } });

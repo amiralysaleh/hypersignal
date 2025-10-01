@@ -3,14 +3,15 @@
 import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
-import { Bar, BarChart, CartesianGrid, Pie, PieChart, XAxis, YAxis, Tooltip as RechartsTooltip, Cell, Legend, LineChart, Line } from 'recharts';
-import { Activity, CheckCircle, Signal, Users, TrendingUp, XCircle, Clock } from 'lucide-react';
+import { CartesianGrid, Pie, PieChart, XAxis, YAxis, Tooltip as RechartsTooltip, Cell, Legend, LineChart, Line } from 'recharts';
+import { Activity, AlertTriangle, ArrowUpRight, CheckCircle, Clock, Signal, TrendingUp, Trophy, Users, XCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import type { DashboardData } from '@/server/services/dashboard';
 import { requestJson } from '@/lib/client/request';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { formatDistanceToNow } from 'date-fns';
 
 const chartConfig = {
   winrate: {
@@ -48,6 +49,9 @@ export default function DashboardPage() {
   }, []);
   
   const pieData = data ? Object.entries(data.signalOutcomes).map(([name, value]) => ({ name, value, fill: pieChartColors[name as keyof typeof pieChartColors] })) : [];
+  const topPairs = data?.topPairs ?? [];
+  const standoutSignals = data?.standoutSignals ?? [];
+  const attentionSignals = data?.attentionSignals ?? [];
   
   const StatsCard = ({ title, value, subtext, icon: Icon, isLoading }: { title: string, value: string | React.ReactNode, subtext: string, icon: React.ElementType, isLoading: boolean }) => (
     <Card>
@@ -177,7 +181,141 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
-      
+
+      <div className="grid gap-4 xl:grid-cols-3">
+        <Card className="xl:col-span-2">
+          <CardHeader>
+            <CardTitle>Most Active Trading Pairs</CardTitle>
+            <CardDescription>Where coordinated activity has appeared most often.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {loading ? (
+              <div className="space-y-3">
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-12 w-full" />
+              </div>
+            ) : topPairs.length > 0 ? (
+              <ul className="space-y-3">
+                {topPairs.map((pair) => (
+                  <li
+                    key={pair.pair}
+                    className="flex items-center justify-between gap-4 rounded-xl border border-border/60 bg-background/60 px-4 py-3 transition hover:border-primary/40 hover:bg-primary/5 dark:hover:bg-primary/10"
+                  >
+                    <div className="min-w-0">
+                      <p className="flex items-center gap-2 text-base font-semibold">
+                        <ArrowUpRight className="h-4 w-4 text-muted-foreground" />
+                        {pair.pair}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground">{pair.signals} coordinated signal{pair.signals === 1 ? '' : 's'} tracked</p>
+                    </div>
+                    <Badge variant="secondary" className="shrink-0 text-xs">
+                      {pair.winRate !== null ? `${pair.winRate.toFixed(1)}% win rate` : 'No closed trades'}
+                    </Badge>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted-foreground">No trading pairs have enough activity yet.</p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Trophy className="h-4 w-4 text-primary" />
+              Standout Signals
+            </CardTitle>
+            <CardDescription>Open signals outperforming their peers.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {loading ? (
+              <div className="space-y-3">
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+              </div>
+            ) : standoutSignals.length > 0 ? (
+              <ul className="space-y-3">
+                {standoutSignals.map((signal) => (
+                  <li
+                    key={`${signal.pair}-${signal.timestamp}`}
+                    className="rounded-xl border border-border/60 bg-background/60 px-4 py-3"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold">{signal.pair}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Updated {formatDistanceToNow(new Date(signal.timestamp), { addSuffix: true })}
+                        </p>
+                      </div>
+                      <Badge
+                        variant={signal.type === 'SHORT' ? 'destructive' : 'default'}
+                        className={cn(
+                          'shrink-0',
+                          signal.type === 'LONG' && 'bg-green-600 text-white hover:bg-green-600/80'
+                        )}
+                      >
+                        {signal.type}
+                      </Badge>
+                    </div>
+                    <p className="mt-2 text-sm font-medium text-green-600">
+                      {signal.roi.toFixed(2)}% ROI · ${signal.pnl.toFixed(2)} PnL
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted-foreground">No open signals are outperforming right now.</p>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-destructive" />
+              Signals Requiring Attention
+            </CardTitle>
+            <CardDescription>Open signals that are currently underwater.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {loading ? (
+              <div className="space-y-3">
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+              </div>
+            ) : attentionSignals.length > 0 ? (
+              <ul className="space-y-3">
+                {attentionSignals.map((signal) => (
+                  <li
+                    key={`${signal.pair}-attention-${signal.timestamp}`}
+                    className="rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold">{signal.pair}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Updated {formatDistanceToNow(new Date(signal.timestamp), { addSuffix: true })}
+                        </p>
+                      </div>
+                      <Badge variant="destructive" className="shrink-0">
+                        {signal.type}
+                      </Badge>
+                    </div>
+                    <p className="mt-2 text-sm font-medium text-destructive">
+                      {signal.roi.toFixed(2)}% ROI · ${signal.pnl.toFixed(2)} PnL
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted-foreground">All open signals are holding steady.</p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
       <Card>
         <CardHeader>
           <CardTitle>Recent Signals</CardTitle>
