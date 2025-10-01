@@ -9,6 +9,19 @@ import { log } from '../logs/actions';
 
 const SIGNALS_FILE_PATH = path.resolve(process.cwd(), 'signals.json');
 
+const OPEN_DIR_PREFIX = 'open';
+const CLOSE_DIR_PREFIX = 'close';
+
+let hasLoggedDirValidationSample = false;
+
+function isOpeningDir(dir: unknown): boolean {
+    return typeof dir === 'string' && dir.toLowerCase().startsWith(OPEN_DIR_PREFIX);
+}
+
+function isClosingDir(dir: unknown): boolean {
+    return typeof dir === 'string' && dir.toLowerCase().startsWith(CLOSE_DIR_PREFIX);
+}
+
 export interface Signal {
     id: string;
     pair: string;
@@ -170,9 +183,11 @@ export async function detectAndSaveSignals(): Promise<void> {
             // Reliable way to determine if a trade is opening a position
             const startPosition = parseFloat(fill.startPosition);
             const tradeSize = parseFloat(fill.sz);
-            const isOpeningTrade = (fill.side === 'B' && startPosition >= 0 && tradeSize > 0) || // Buying to open/increase a long
-                                   (fill.side === 'A' && startPosition <= 0 && tradeSize > 0);   // Selling to open/increase a short
-            
+            const isOpeningTrade = isOpeningDir(fill.dir) && (
+                (fill.side === 'B' && startPosition >= 0 && tradeSize > 0) || // Buying to open/increase a long
+                (fill.side === 'A' && startPosition <= 0 && tradeSize > 0)    // Selling to open/increase a short
+            );
+
             if (isRecent && isOpeningTrade) {
                 const wallet = walletDataMap.get(address.toLowerCase());
                 const cooldownTimestamp = wallet?.cooldowns?.[fill.coin];
@@ -190,9 +205,63 @@ export async function detectAndSaveSignals(): Promise<void> {
       return;
     }
 
+    const shouldRunDirValidationSample = !hasLoggedDirValidationSample && (process.env.NODE_ENV === 'development' || process.env.RUN_SIGNAL_FILTER_VALIDATION === 'true');
+
+    if (shouldRunDirValidationSample) {
+        const validationSample = [
+            { id: 'sample-open-long', dir: 'OpenLong' },
+            { id: 'sample-close-long', dir: 'CloseLong' },
+            { id: 'sample-open-short', dir: 'OpenShort' },
+            { id: 'sample-close-short', dir: 'CloseShort' },
+        ];
+
+        const filteredSample = validationSample.filter(sample => isOpeningDir(sample.dir));
+        const containsClosingDir = filteredSample.some(sample => isClosingDir(sample.dir));
+
+        await log({
+            level: containsClosingDir ? 'WARN' : 'INFO',
+            message: containsClosingDir
+                ? 'Validation sample detected a closing dir after filtering. Please review the dir filtering logic.'
+                : 'Validation sample confirmed that only opening dirs are retained for clustering.',
+            context: {
+                filteredIds: filteredSample.map(sample => sample.id),
+            },
+        });
+
+        hasLoggedDirValidationSample = true;
+    }
+
     // Step 2: Group these fills by their potential signal (e.g., "ETH-LONG")
     const fillsByPosition: { [key: string]: any[] } = {};
     for (const fill of recentOpeningFills) {
+        if (isClosingDir(fill.dir)) {
+            await log({
+                level: 'INFO',
+                message: 'Skipped a closing fill while grouping fills by position.',
+                context: {
+                    dir: fill.dir,
+                    coin: fill.coin,
+                    walletAddress: fill.walletAddress,
+                    time: fill.time,
+                },
+            });
+            continue;
+        }
+
+        if (!isOpeningDir(fill.dir)) {
+            await log({
+                level: 'INFO',
+                message: 'Skipped a fill with an unrecognized dir while grouping fills by position.',
+                context: {
+                    dir: fill.dir,
+                    coin: fill.coin,
+                    walletAddress: fill.walletAddress,
+                    time: fill.time,
+                },
+            });
+            continue;
+        }
+
         const type = fill.side === 'B' ? 'LONG' : 'SHORT';
         const key = `${fill.coin}-${type}`;
         if (!fillsByPosition[key]) {
@@ -229,24 +298,46 @@ export async function detectAndSaveSignals(): Promise<void> {
             continue;
         }
         
-        const totalVolume = bestCluster.reduce((sum, fill) => sum + (parseFloat(fill.px) * Math.abs(parseFloat(fill.sz))), 0);
+        const sanitizedCluster = bestCluster.filter(fill => isOpeningDir(fill.dir));
+
+        if (sanitizedCluster.length === 0) {
+            await log({
+                level: 'INFO',
+                message: 'Cluster discarded because no opening fills remained after dir sanitization.',
+                context: { key },
+            });
+            continue;
+        }
+
+        if (sanitizedCluster.length !== bestCluster.length) {
+            await log({
+                level: 'WARN',
+                message: 'Removed non-opening fills during cluster sanitization.',
+                context: {
+                    key,
+                    removedCount: bestCluster.length - sanitizedCluster.length,
+                },
+            });
+        }
+
+        const totalVolume = sanitizedCluster.reduce((sum, fill) => sum + (parseFloat(fill.px) * Math.abs(parseFloat(fill.sz))), 0);
         if (totalVolume < minVolume) {
             continue;
         }
 
-        const { coin, side } = bestCluster[0];
+        const { coin, side } = sanitizedCluster[0];
         const type = side === 'B' ? 'LONG' : 'SHORT';
-        const signalTimestamp = bestCluster.reduce((latest, fill) => Math.max(latest, fill.time), 0);
+        const signalTimestamp = sanitizedCluster.reduce((latest, fill) => Math.max(latest, fill.time), 0);
         const signalId = `${coin}-${type}-${signalTimestamp}`;
 
         if (existingSignals.some(s => s.id === signalId)) {
             continue;
         }
-        
-        const participatingWallets = Array.from(new Set(bestCluster.map(f => f.walletAddress)));
-        
-        const totalSize = bestCluster.reduce((acc, fill) => acc + Math.abs(parseFloat(fill.sz)), 0);
-        const totalCost = bestCluster.reduce((acc, fill) => acc + (parseFloat(fill.px) * Math.abs(parseFloat(fill.sz))), 0);
+
+        const participatingWallets = Array.from(new Set(sanitizedCluster.map(f => f.walletAddress)));
+
+        const totalSize = sanitizedCluster.reduce((acc, fill) => acc + Math.abs(parseFloat(fill.sz)), 0);
+        const totalCost = sanitizedCluster.reduce((acc, fill) => acc + (parseFloat(fill.px) * Math.abs(parseFloat(fill.sz))), 0);
         const avgEntryPrice = totalSize > 0 ? totalCost / totalSize : 0;
 
         const currentPriceStr = await getMarkPrice(coin) ?? '0.00';
@@ -254,7 +345,7 @@ export async function detectAndSaveSignals(): Promise<void> {
         
         const pnl = totalSize > 0 ? (currentPrice - avgEntryPrice) * totalSize * (type === 'LONG' ? 1 : -1) : 0;
         
-        const { totalMargin, totalLeverageValue, leverageCount } = bestCluster.reduce((acc, fill) => {
+        const { totalMargin, totalLeverageValue, leverageCount } = sanitizedCluster.reduce((acc, fill) => {
              const leverage = fill.leverage?.value ? parseFloat(fill.leverage.value) : 10;
              const fillSize = Math.abs(parseFloat(fill.sz));
              const fillPrice = parseFloat(fill.px);
@@ -297,7 +388,7 @@ export async function detectAndSaveSignals(): Promise<void> {
             currentPrice: currentPrice.toFixed(4),
             takeProfitTargets: takeProfitLevels,
             stopLoss: stopLossLevel,
-            clusterFills: bestCluster,
+            clusterFills: sanitizedCluster,
         };
         
         existingSignals.push(newSignal);
