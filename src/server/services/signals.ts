@@ -66,6 +66,46 @@ async function scheduleHyperliquidRequest<T>(task: () => Promise<T>): Promise<T>
 
 const SIGNALS_FILE_PATH = 'signals.json';
 
+type SignalDirection = 'LONG' | 'SHORT';
+
+function classifyFillForSignal(fill: any): { signalType: SignalDirection } | null {
+  const tradeSize = Number.parseFloat(fill?.sz);
+  if (!Number.isFinite(tradeSize) || tradeSize <= 0) {
+    return null;
+  }
+
+  const normalizedDir = typeof fill?.dir === 'string' ? fill.dir.toLowerCase() : '';
+
+  if (normalizedDir.includes('close')) {
+    return null;
+  }
+
+  if (normalizedDir.includes('open')) {
+    if (normalizedDir.includes('long')) {
+      return { signalType: 'LONG' };
+    }
+
+    if (normalizedDir.includes('short')) {
+      return { signalType: 'SHORT' };
+    }
+  }
+
+  const startPosition = Number.parseFloat(fill?.startPosition);
+  if (!Number.isFinite(startPosition)) {
+    return null;
+  }
+
+  if (fill?.side === 'B' && startPosition >= 0) {
+    return { signalType: 'LONG' };
+  }
+
+  if (fill?.side === 'A' && startPosition <= 0) {
+    return { signalType: 'SHORT' };
+  }
+
+  return null;
+}
+
 export interface Signal {
   id: string;
   pair: string;
@@ -288,20 +328,16 @@ export async function detectAndSaveSignals(): Promise<void> {
   fillsByWallet.forEach(({ address, fills }) => {
     fills.forEach((fill: any) => {
       const isRecent = now - fill.time < timeWindowMs;
-      const startPosition = parseFloat(fill.startPosition);
-      const tradeSize = parseFloat(fill.sz);
-      const isOpeningTrade =
-        (fill.side === 'B' && startPosition >= 0 && tradeSize > 0) ||
-        (fill.side === 'A' && startPosition <= 0 && tradeSize > 0);
+      const classification = classifyFillForSignal(fill);
 
-      if (isRecent && isOpeningTrade) {
+      if (isRecent && classification) {
         const wallet = walletDataMap.get(address.toLowerCase());
         const cooldownTimestamp = wallet?.cooldowns?.[fill.coin];
         const isOnCooldown =
           cooldownTimestamp && now - new Date(cooldownTimestamp).getTime() < cooldownMs;
 
         if (!isOnCooldown) {
-          recentOpeningFills.push({ ...fill, walletAddress: address });
+          recentOpeningFills.push({ ...fill, walletAddress: address, signalType: classification.signalType });
         }
       }
     });
@@ -312,25 +348,33 @@ export async function detectAndSaveSignals(): Promise<void> {
     return;
   }
 
-  const fillsByPosition: Record<string, any[]> = {};
+  const fillsByPosition = new Map<string, { type: SignalDirection; fills: any[] }>();
   for (const fill of recentOpeningFills) {
-    const type = fill.side === 'B' ? 'LONG' : 'SHORT';
+    const type: SignalDirection | undefined = fill.signalType;
+    if (!type) {
+      continue;
+    }
+
     const key = `${fill.coin}-${type}`;
-    fillsByPosition[key] = fillsByPosition[key] ?? [];
-    fillsByPosition[key].push(fill);
+    const existing = fillsByPosition.get(key);
+    if (existing) {
+      existing.fills.push(fill);
+    } else {
+      fillsByPosition.set(key, { type, fills: [fill] });
+    }
   }
 
   const existingSignals = await readSignals();
   let newSignalsWereAdded = false;
 
-  for (const key in fillsByPosition) {
-    const positionFills = fillsByPosition[key].sort((a, b) => a.time - b.time);
+  for (const { type: signalType, fills: positionFills } of fillsByPosition.values()) {
+    const sortedFills = positionFills.sort((a, b) => a.time - b.time);
     let bestCluster: any[] | null = null;
 
-    for (let i = 0; i < positionFills.length; i++) {
-      const anchorFill = positionFills[i];
+    for (let i = 0; i < sortedFills.length; i++) {
+      const anchorFill = sortedFills[i];
       const windowEnd = anchorFill.time + timeWindowMs;
-      const windowFills = positionFills.filter((fill) => fill.time >= anchorFill.time && fill.time < windowEnd);
+      const windowFills = sortedFills.filter((fill) => fill.time >= anchorFill.time && fill.time < windowEnd);
       const uniqueWallets = new Set(windowFills.map((fill) => fill.walletAddress));
       if (uniqueWallets.size >= minWalletCount) {
         if (!bestCluster || uniqueWallets.size > new Set(bestCluster.map((fill) => fill.walletAddress)).size) {
@@ -351,8 +395,8 @@ export async function detectAndSaveSignals(): Promise<void> {
       continue;
     }
 
-    const { coin, side } = bestCluster[0];
-    const type = side === 'B' ? 'LONG' : 'SHORT';
+    const { coin } = bestCluster[0];
+    const type = signalType;
     const signalTimestamp = bestCluster.reduce((latest, fill) => Math.max(latest, fill.time), 0);
     const signalId = `${coin}-${type}-${signalTimestamp}`;
 
