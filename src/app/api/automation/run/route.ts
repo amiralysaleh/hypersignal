@@ -7,6 +7,10 @@ import { setCloudflareEnv, type CloudflareBindings } from '@/server/storage/env'
 
 export async function POST() {
   const context = getCloudflareContext({ async: false });
+  if (!context?.env) {
+    throw new Error('Cloudflare bindings are not available in this environment.');
+  }
+
   setCloudflareEnv(context.env as CloudflareBindings);
 
   await log({ level: 'INFO', message: 'Cloudflare worker tick started' });
