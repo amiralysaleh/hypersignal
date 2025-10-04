@@ -78,4 +78,4 @@ npx wrangler d1 migrations apply hypersignal --local
 npx wrangler dev --test-scheduled
 ```
 
-This spins up the worker, injects a temporary D1 database and executes the scheduled job so you can verify signal detection without pushing to production.
+This spins up the worker, injects a temporary D1 database and executes the scheduled job so you can verify signal detection without pushing to production
