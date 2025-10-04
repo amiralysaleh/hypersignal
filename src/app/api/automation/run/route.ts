@@ -9,23 +9,41 @@ export async function POST() {
   const context = getCloudflareContext({ async: false });
   setCloudflareEnv(context.env as CloudflareBindings);
 
-  await log({ level: 'INFO', message: 'Cloudflare worker tick started' });
+  const runId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const startedAt = Date.now();
+  let status: 'success' | 'error' = 'success';
+
+  await log({ level: 'INFO', message: 'Cloudflare worker tick started', context: { runId } });
 
   try {
+    await log({ level: 'INFO', message: 'Detecting new signals', context: { runId } });
     await detectAndSaveSignals();
+    await log({ level: 'INFO', message: 'Updating signal prices', context: { runId } });
     await updateSignalPrices();
-    await log({ level: 'INFO', message: 'Cloudflare worker tick completed' });
     return NextResponse.json({ status: 'ok' });
   } catch (error) {
     const err = error as Error;
+    status = 'error';
     await log({
       level: 'ERROR',
       message: 'Cloudflare worker tick failed',
       context: {
+        runId,
         message: err.message,
         stack: err.stack,
       },
     });
     throw err;
+  } finally {
+    const durationMs = Date.now() - startedAt;
+    await log({
+      level: 'INFO',
+      message: status === 'success' ? 'Cloudflare worker tick completed' : 'Cloudflare worker tick ended with errors',
+      context: {
+        runId,
+        status,
+        durationMs,
+      },
+    });
   }
 }
