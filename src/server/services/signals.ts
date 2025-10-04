@@ -303,21 +303,57 @@ ${signal.takeProfitTargets.map((tp, i) => `TP ${i + 1}: ${tp}`).join('\n')}
 }
 
 export async function detectAndSaveSignals(): Promise<void> {
+  const detectionStartedAt = Date.now();
   const walletsWithCooldown = await getTrackedWalletsWithCooldown();
   const trackedAddresses = walletsWithCooldown.map((wallet) => wallet.address);
   const settings = await getSettings();
   const { minWalletCount, timeWindow, minVolume, defaultStopLoss, takeProfitTargets: tpTargetsSetting } = settings;
 
+  await log({
+    level: 'INFO',
+    message: 'Signal detection run started.',
+    context: {
+      trackedWalletCount: trackedAddresses.length,
+      minWalletCount,
+      timeWindowMinutes: timeWindow,
+      minVolume,
+    },
+  });
+
   if (trackedAddresses.length === 0 || minWalletCount <= 0 || timeWindow <= 0) {
-    await log({ level: 'INFO', message: 'Signal detection skipped: Insufficient configuration or no tracked wallets.' });
+    await log({
+      level: 'INFO',
+      message: 'Signal detection skipped: Insufficient configuration or no tracked wallets.',
+      context: {
+        trackedWalletCount: trackedAddresses.length,
+        minWalletCount,
+        timeWindowMinutes: timeWindow,
+        minVolume,
+        detectionDurationMs: Date.now() - detectionStartedAt,
+      },
+    });
     return;
   }
 
+  const walletScanStartedAt = Date.now();
   const fillsByWallet = await Promise.all(
     trackedAddresses.map((address) =>
       getUserFills(address).then((fills) => ({ address, fills: fills || [] }))
     )
   );
+  const totalFillsFetched = fillsByWallet.reduce((sum, { fills }) => sum + fills.length, 0);
+  const walletsWithFills = fillsByWallet.filter(({ fills }) => fills.length > 0).length;
+  await log({
+    level: 'INFO',
+    message: 'Wallet scan completed.',
+    context: {
+      walletsScanned: trackedAddresses.length,
+      walletsWithFills,
+      walletsWithoutFills: trackedAddresses.length - walletsWithFills,
+      totalFillsFetched,
+      scanDurationMs: Date.now() - walletScanStartedAt,
+    },
+  });
 
   const timeWindowMs = timeWindow * 60 * 1000;
   const cooldownMs = 2 * 60 * 60 * 1000;
@@ -344,7 +380,16 @@ export async function detectAndSaveSignals(): Promise<void> {
   });
 
   if (recentOpeningFills.length === 0) {
-    await log({ level: 'INFO', message: 'No recent opening fills meeting criteria found.' });
+    await log({
+      level: 'INFO',
+      message: 'No recent opening fills meeting criteria found.',
+      context: {
+        totalFillsFetched,
+        walletsScanned: trackedAddresses.length,
+        timeWindowMinutes: timeWindow,
+        detectionDurationMs: Date.now() - detectionStartedAt,
+      },
+    });
     return;
   }
 
@@ -365,6 +410,7 @@ export async function detectAndSaveSignals(): Promise<void> {
   }
 
   const existingSignals = await readSignals();
+  const newSignals: Signal[] = [];
   let newSignalsWereAdded = false;
 
   for (const { type: signalType, fills: positionFills } of fillsByPosition.values()) {
@@ -470,6 +516,7 @@ export async function detectAndSaveSignals(): Promise<void> {
     };
 
     existingSignals.push(newSignal);
+    newSignals.push(newSignal);
     await updateWalletCooldowns(participatingWallets, coin);
     await sendTelegramMessage(newSignal, settings);
     newSignalsWereAdded = true;
@@ -478,9 +525,29 @@ export async function detectAndSaveSignals(): Promise<void> {
   if (newSignalsWereAdded) {
     existingSignals.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     await writeSignals(existingSignals);
-    await log({ level: 'INFO', message: 'New signal(s) were detected and saved.' });
+    const detectionDurationMs = Date.now() - detectionStartedAt;
+    await log({
+      level: 'INFO',
+      message: 'New signal(s) were detected and saved.',
+      context: {
+        newSignalCount: newSignals.length,
+        coins: Array.from(new Set(newSignals.map((signal) => signal.pair))).sort(),
+        totalContributingWallets: newSignals.reduce((sum, signal) => sum + signal.contributingWallets, 0),
+        candidatePositionCount: fillsByPosition.size,
+        recentOpeningFillCount: recentOpeningFills.length,
+        detectionDurationMs,
+      },
+    });
   } else {
-    await log({ level: 'INFO', message: 'No new signals detected in this run.' });
+    await log({
+      level: 'INFO',
+      message: 'No new signals detected in this run.',
+      context: {
+        candidatePositionCount: fillsByPosition.size,
+        recentOpeningFillCount: recentOpeningFills.length,
+        detectionDurationMs: Date.now() - detectionStartedAt,
+      },
+    });
   }
 }
 
@@ -501,9 +568,11 @@ export async function updateSignalPrices(): Promise<Signal[]> {
   const signals = await readSignals();
   const openSignals = signals.filter((signal) => signal.status === 'Open');
   if (openSignals.length === 0) {
+    await log({ level: 'INFO', message: 'Signal price update skipped: no open signals.' });
     return signals;
   }
 
+  const updateStartedAt = Date.now();
   const uniqueCoins = Array.from(new Set(openSignals.map((signal) => signal.pair)));
   const priceResults = await Promise.all(uniqueCoins.map((coin) => getMarkPrice(coin).then((price) => ({ coin, price }))));
   const prices = priceResults.reduce<Record<string, number>>((acc, { coin, price }) => {
@@ -517,6 +586,8 @@ export async function updateSignalPrices(): Promise<Signal[]> {
   let signalsWereUpdated = false;
   let walletsWereUpdated = false;
   const wallets = await readWallets();
+  let updatedSignalCount = 0;
+  const statusChangeCounts: Partial<Record<Signal['status'], number>> = {};
 
   const updatedSignals = signals.map((signal) => {
     if (signal.status !== 'Open') {
@@ -556,6 +627,8 @@ export async function updateSignalPrices(): Promise<Signal[]> {
     const pnl = (finalPrice - entryPrice) * size * (signal.type === 'LONG' ? 1 : -1);
     const roi = margin > 0 ? (pnl / margin) * 100 : 0;
 
+    updatedSignalCount += 1;
+
     if (newStatus !== 'Open') {
       walletsWereUpdated = true;
       const totalSignalSize = signal.clusterFills
@@ -592,6 +665,10 @@ export async function updateSignalPrices(): Promise<Signal[]> {
       }
     }
 
+    if (newStatus !== signal.status) {
+      statusChangeCounts[newStatus] = (statusChangeCounts[newStatus] ?? 0) + 1;
+    }
+
     return {
       ...signal,
       status: newStatus,
@@ -608,6 +685,19 @@ export async function updateSignalPrices(): Promise<Signal[]> {
   if (walletsWereUpdated) {
     await writeWallets(wallets);
   }
+
+  await log({
+    level: 'INFO',
+    message: 'Signal price update completed.',
+    context: {
+      openSignalCount: openSignals.length,
+      signalsUpdated: updatedSignalCount,
+      statusChanges: statusChangeCounts,
+      walletsUpdated,
+      coinsFetched: uniqueCoins.length,
+      updateDurationMs: Date.now() - updateStartedAt,
+    },
+  });
 
   return updatedSignals;
 }
