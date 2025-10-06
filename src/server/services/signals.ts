@@ -7,6 +7,10 @@ const HYPERLIQUID_MIN_REQUEST_INTERVAL_MS = Math.max(
   0,
   Number(process.env.HYPERLIQUID_MIN_REQUEST_INTERVAL_MS ?? 1_000)
 );
+const HYPERLIQUID_REQUEST_TIMEOUT_MS = Math.max(
+  1_000,
+  Number(process.env.HYPERLIQUID_REQUEST_TIMEOUT_MS ?? 15_000)
+);
 const USER_FILLS_MAX_RETRIES = Math.max(1, Number(process.env.USER_FILLS_MAX_RETRIES ?? 5));
 const USER_FILLS_INITIAL_BACKOFF_MS = Math.max(
   250,
@@ -16,10 +20,38 @@ const USER_FILLS_MAX_BACKOFF_MS = Math.max(
   USER_FILLS_INITIAL_BACKOFF_MS,
   Number(process.env.USER_FILLS_MAX_BACKOFF_MS ?? 60_000)
 );
+const HYPERLIQUID_TIMEOUT_PENALTY_MS = Math.max(
+  HYPERLIQUID_MIN_REQUEST_INTERVAL_MS,
+  HYPERLIQUID_REQUEST_TIMEOUT_MS,
+  USER_FILLS_INITIAL_BACKOFF_MS
+);
 
 const hyperliquidBaseUrl = 'https://api.hyperliquid.xyz/info';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+class RequestTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RequestTimeoutError';
+  }
+}
+
+async function fetchWithTimeout(input: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error: any) {
+    if (error?.name === 'AbortError') {
+      throw new RequestTimeoutError(`Hyperliquid request timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 let hyperliquidQueue: Promise<void> = Promise.resolve();
 let lastHyperliquidRequestTimestamp = 0;
@@ -140,11 +172,15 @@ async function writeSignals(signals: Signal[]): Promise<void> {
 async function getMarkPrice(coin: string): Promise<string> {
   try {
     const { response, body } = await scheduleHyperliquidRequest(async () => {
-      const response = await fetch(hyperliquidBaseUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'allMids' }),
-      });
+      const response = await fetchWithTimeout(
+        hyperliquidBaseUrl,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'allMids' }),
+        },
+        HYPERLIQUID_REQUEST_TIMEOUT_MS
+      );
 
       let body: any = null;
       try {
@@ -170,7 +206,16 @@ async function getMarkPrice(coin: string): Promise<string> {
 
     return body[coin] ?? '0.00';
   } catch (error: any) {
-    await log({ level: 'ERROR', message: `Failed to fetch mark price for ${coin}`, context: { error: error.message } });
+    if (error instanceof RequestTimeoutError) {
+      registerHyperliquidPenalty(HYPERLIQUID_TIMEOUT_PENALTY_MS);
+      await log({
+        level: 'WARN',
+        message: `Hyperliquid request timed out while fetching mark price for ${coin}`,
+        context: { timeoutMs: HYPERLIQUID_REQUEST_TIMEOUT_MS },
+      });
+    } else {
+      await log({ level: 'ERROR', message: `Failed to fetch mark price for ${coin}`, context: { error: error.message } });
+    }
     return '0.00';
   }
 }
@@ -181,11 +226,15 @@ async function getUserFills(address: string): Promise<any[]> {
   for (let attempt = 1; attempt <= USER_FILLS_MAX_RETRIES; attempt++) {
     try {
       const { response, body } = await scheduleHyperliquidRequest(async () => {
-        const response = await fetch(hyperliquidBaseUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'userFills', user: address }),
-        });
+        const response = await fetchWithTimeout(
+          hyperliquidBaseUrl,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'userFills', user: address }),
+          },
+          HYPERLIQUID_REQUEST_TIMEOUT_MS
+        );
 
         let body: any = null;
         try {
@@ -224,21 +273,33 @@ async function getUserFills(address: string): Promise<any[]> {
       });
       return [];
     } catch (error: any) {
+      const isTimeout = error instanceof RequestTimeoutError;
       const message = error?.message ?? 'Unknown error';
+
       if (attempt >= USER_FILLS_MAX_RETRIES) {
         await log({
           level: 'ERROR',
           message: `Failed to fetch user fills for ${address}`,
-          context: { error: message, attempt },
+          context: { error: message, attempt, timeout: isTimeout },
         });
         break;
       }
 
-      await log({
-        level: 'WARN',
-        message: `Retrying user fills request for ${address}`,
-        context: { error: message, attempt },
-      });
+      if (isTimeout) {
+        await log({
+          level: 'WARN',
+          message: `Hyperliquid request timed out while fetching user fills for ${address}`,
+          context: { attempt, timeoutMs: HYPERLIQUID_REQUEST_TIMEOUT_MS },
+        });
+        registerHyperliquidPenalty(HYPERLIQUID_TIMEOUT_PENALTY_MS);
+      } else {
+        await log({
+          level: 'WARN',
+          message: `Retrying user fills request for ${address}`,
+          context: { error: message, attempt },
+        });
+      }
+
       await sleep(backoff);
       backoff = Math.min(backoff * 2, USER_FILLS_MAX_BACKOFF_MS);
     }
