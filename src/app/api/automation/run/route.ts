@@ -7,6 +7,7 @@ import {
   completeWorkerRun,
   markStaleWorkerRuns,
   registerWorkerRun,
+  touchWorkerRun,
 } from '@/server/services/workerRuns';
 import { setCloudflareEnv, type CloudflareBindings } from '@/server/storage/env';
 
@@ -39,10 +40,32 @@ export async function POST() {
   await log({ level: 'INFO', message: 'Cloudflare worker tick started', context: { runId } });
 
   try {
+    const createHeartbeat = () => {
+      let lastBeat = 0;
+      return async (progress?: { durationMs?: number }) => {
+        const now = Date.now();
+        if (now - lastBeat < 5000 && !(progress?.durationMs && progress.durationMs >= 60000)) {
+          return;
+        }
+
+        lastBeat = now;
+        await touchWorkerRun({ runId, durationMs: progress?.durationMs });
+      };
+    };
+
+    const heartbeat = createHeartbeat();
+
     await log({ level: 'INFO', message: 'Detecting new signals', context: { runId } });
-    await detectAndSaveSignals();
+    await detectAndSaveSignals({
+      onProgress: async ({ durationMs }) => {
+        await heartbeat({ durationMs });
+      },
+    });
+    await heartbeat({ durationMs: Date.now() - startedAt });
     await log({ level: 'INFO', message: 'Updating signal prices', context: { runId } });
+    await heartbeat({ durationMs: Date.now() - startedAt });
     await updateSignalPrices();
+    await heartbeat({ durationMs: Date.now() - startedAt });
     return NextResponse.json({ status: 'ok' });
   } catch (error) {
     const err = error as Error;

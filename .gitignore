@@ -38,6 +38,8 @@ yarn-error.log*
 next-env.d.ts
 .open-next
 cloudflare-env.d.ts
+!types/cloudflare-env.d.ts
+!types/opennextjs-cloudflare.d.ts
 
 .genkit/*
 .env*
