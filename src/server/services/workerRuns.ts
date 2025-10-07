@@ -89,6 +89,43 @@ export async function registerWorkerRun({ runId, startedAt }: RegisterWorkerRunO
   await writeWorkerRuns(updatedRuns);
 }
 
+interface TouchWorkerRunOptions {
+  runId: string;
+  durationMs?: number;
+}
+
+export async function touchWorkerRun({ runId, durationMs }: TouchWorkerRunOptions): Promise<void> {
+  const runs = await readWorkerRuns();
+  const nowIso = new Date().toISOString();
+
+  let runFound = false;
+  const updatedRuns = runs.map((run) => {
+    if (run.runId !== runId) {
+      return run;
+    }
+
+    runFound = true;
+    return {
+      ...run,
+      status: run.status === 'running' ? run.status : 'running',
+      updatedAt: nowIso,
+      ...(durationMs !== undefined ? { durationMs } : {}),
+    };
+  });
+
+  if (!runFound) {
+    updatedRuns.unshift({
+      runId,
+      status: 'running',
+      startedAt: nowIso,
+      updatedAt: nowIso,
+      ...(durationMs !== undefined ? { durationMs } : {}),
+    });
+  }
+
+  await writeWorkerRuns(updatedRuns);
+}
+
 interface CompleteWorkerRunOptions {
   runId: string;
   status: 'success' | 'error';
