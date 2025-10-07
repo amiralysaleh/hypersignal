@@ -17,7 +17,12 @@ export function getCloudflareEnv(): CloudflareBindings {
 
   try {
     const context = getCloudflareContext({ async: false });
-    if (context?.env && 'DB' in context.env) {
+    if (
+      context?.env &&
+      typeof context.env === 'object' &&
+      context.env !== null &&
+      'DB' in context.env
+    ) {
       return context.env as CloudflareBindings;
     }
   } catch (error) {

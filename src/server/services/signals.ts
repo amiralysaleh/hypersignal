@@ -2,10 +2,15 @@ import { readJsonFile, writeJsonFile } from '../storage/jsonStore';
 import { getTrackedWalletsWithCooldown, readWallets, updateWalletCooldowns, writeWallets } from './wallets';
 import { getSettings, Settings } from './settings';
 import { log } from './logs';
+import { advanceWorkerWalletCursor, readWorkerState, writeWorkerState } from './workerState';
 
 const HYPERLIQUID_MIN_REQUEST_INTERVAL_MS = Math.max(
   0,
   Number(process.env.HYPERLIQUID_MIN_REQUEST_INTERVAL_MS ?? 1_000)
+);
+const HYPERLIQUID_REQUEST_TIMEOUT_MS = Math.max(
+  1_000,
+  Number(process.env.HYPERLIQUID_REQUEST_TIMEOUT_MS ?? 15_000)
 );
 const USER_FILLS_MAX_RETRIES = Math.max(1, Number(process.env.USER_FILLS_MAX_RETRIES ?? 5));
 const USER_FILLS_INITIAL_BACKOFF_MS = Math.max(
@@ -16,10 +21,130 @@ const USER_FILLS_MAX_BACKOFF_MS = Math.max(
   USER_FILLS_INITIAL_BACKOFF_MS,
   Number(process.env.USER_FILLS_MAX_BACKOFF_MS ?? 60_000)
 );
+const HYPERLIQUID_TIMEOUT_PENALTY_MS = Math.max(
+  HYPERLIQUID_MIN_REQUEST_INTERVAL_MS,
+  HYPERLIQUID_REQUEST_TIMEOUT_MS,
+  USER_FILLS_INITIAL_BACKOFF_MS
+);
+const DETECTION_RUN_TIME_LIMIT_MS = Math.max(
+  60_000,
+  Number(process.env.DETECTION_RUN_TIME_LIMIT_MS ?? 4 * 60_000)
+);
+const DETECTION_RUN_WARNING_THRESHOLD_MS = Math.max(
+  30_000,
+  Math.min(
+    Number(process.env.DETECTION_RUN_WARNING_THRESHOLD_MS ?? 3 * 60_000),
+    DETECTION_RUN_TIME_LIMIT_MS
+  )
+);
+const DETECTION_MAX_WALLETS_PER_RUN = Math.max(
+  1,
+  Number(process.env.DETECTION_MAX_WALLETS_PER_RUN ?? 50)
+);
+
+const TELEGRAM_REQUEST_TIMEOUT_MS = Math.max(
+  5_000,
+  Number(process.env.TELEGRAM_REQUEST_TIMEOUT_MS ?? 15_000)
+);
+
+const LONG_WAIT_HEARTBEAT_INTERVAL_MS = Math.max(
+  500,
+  Number(process.env.LONG_WAIT_HEARTBEAT_INTERVAL_MS ?? 1_000)
+);
+
+type DetectionProgressPhase = 'fetch' | 'aggregate' | 'complete';
+
+interface DetectSignalsProgress {
+  processedWallets: number;
+  totalWallets: number;
+  durationMs: number;
+  phase: DetectionProgressPhase;
+  aborted: boolean;
+}
+
+interface DetectSignalsOptions {
+  onProgress?: (progress: DetectSignalsProgress) => void | Promise<void>;
+  deadlineMs?: number;
+}
+
+interface UpdateSignalPricesProgress {
+  stage: 'start' | 'coin' | 'complete';
+  durationMs: number;
+  coin?: string;
+  index?: number;
+  total?: number;
+  skipped?: boolean;
+}
+
+interface UpdateSignalPricesOptions {
+  deadlineMs?: number;
+  onProgress?: (progress: UpdateSignalPricesProgress) => void | Promise<void>;
+}
 
 const hyperliquidBaseUrl = 'https://api.hyperliquid.xyz/info';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function waitWithActivity({
+  durationMs,
+  deadline,
+  onActivity,
+}: {
+  durationMs: number;
+  deadline?: number;
+  onActivity?: () => void | Promise<void>;
+}): Promise<boolean> {
+  if (durationMs <= 0) {
+    return Boolean(deadline && Date.now() >= deadline);
+  }
+
+  const waitUntil = Date.now() + durationMs;
+
+  while (Date.now() < waitUntil) {
+    if (deadline && Date.now() >= deadline) {
+      return true;
+    }
+
+    if (onActivity) {
+      await onActivity();
+    }
+
+    const remaining = waitUntil - Date.now();
+    const sleepFor = Math.min(remaining, LONG_WAIT_HEARTBEAT_INTERVAL_MS);
+    if (sleepFor > 0) {
+      await sleep(sleepFor);
+    }
+  }
+
+  if (onActivity) {
+    await onActivity();
+  }
+
+  return Boolean(deadline && Date.now() >= deadline);
+}
+
+class RequestTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RequestTimeoutError';
+  }
+}
+
+async function fetchWithTimeout(input: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error: any) {
+    if (error?.name === 'AbortError') {
+      throw new RequestTimeoutError(`Hyperliquid request timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 let hyperliquidQueue: Promise<void> = Promise.resolve();
 let lastHyperliquidRequestTimestamp = 0;
@@ -140,11 +265,15 @@ async function writeSignals(signals: Signal[]): Promise<void> {
 async function getMarkPrice(coin: string): Promise<string> {
   try {
     const { response, body } = await scheduleHyperliquidRequest(async () => {
-      const response = await fetch(hyperliquidBaseUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'allMids' }),
-      });
+      const response = await fetchWithTimeout(
+        hyperliquidBaseUrl,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'allMids' }),
+        },
+        HYPERLIQUID_REQUEST_TIMEOUT_MS
+      );
 
       let body: any = null;
       try {
@@ -170,22 +299,55 @@ async function getMarkPrice(coin: string): Promise<string> {
 
     return body[coin] ?? '0.00';
   } catch (error: any) {
-    await log({ level: 'ERROR', message: `Failed to fetch mark price for ${coin}`, context: { error: error.message } });
+    if (error instanceof RequestTimeoutError) {
+      registerHyperliquidPenalty(HYPERLIQUID_TIMEOUT_PENALTY_MS);
+      await log({
+        level: 'WARN',
+        message: `Hyperliquid request timed out while fetching mark price for ${coin}`,
+        context: { timeoutMs: HYPERLIQUID_REQUEST_TIMEOUT_MS },
+      });
+    } else {
+      await log({ level: 'ERROR', message: `Failed to fetch mark price for ${coin}`, context: { error: error.message } });
+    }
     return '0.00';
   }
 }
 
-async function getUserFills(address: string): Promise<any[]> {
+interface GetUserFillsOptions {
+  deadline?: number;
+  onActivity?: () => void | Promise<void>;
+}
+
+interface UserFillsResult {
+  fills: any[];
+  aborted: boolean;
+}
+
+async function getUserFills(address: string, options: GetUserFillsOptions = {}): Promise<UserFillsResult> {
   let backoff = USER_FILLS_INITIAL_BACKOFF_MS;
+  const { deadline, onActivity } = options;
+
+  const hasExceededDeadline = () => (deadline ? Date.now() >= deadline : false);
 
   for (let attempt = 1; attempt <= USER_FILLS_MAX_RETRIES; attempt++) {
+    if (hasExceededDeadline()) {
+      return { fills: [], aborted: true };
+    }
+
     try {
+      if (onActivity) {
+        await onActivity();
+      }
       const { response, body } = await scheduleHyperliquidRequest(async () => {
-        const response = await fetch(hyperliquidBaseUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'userFills', user: address }),
-        });
+        const response = await fetchWithTimeout(
+          hyperliquidBaseUrl,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'userFills', user: address }),
+          },
+          HYPERLIQUID_REQUEST_TIMEOUT_MS
+        );
 
         let body: any = null;
         try {
@@ -199,10 +361,10 @@ async function getUserFills(address: string): Promise<any[]> {
 
       if (response.ok) {
         if (Array.isArray(body)) {
-          return body;
+          return { fills: body, aborted: false };
         }
 
-        return body ?? [];
+        return { fills: body ?? [], aborted: false };
       }
 
       if (response.status === 429) {
@@ -212,7 +374,26 @@ async function getUserFills(address: string): Promise<any[]> {
           context: { attempt, status: response.status, nextDelayMs: backoff },
         });
         registerHyperliquidPenalty(backoff);
-        await sleep(backoff);
+
+        if (attempt >= USER_FILLS_MAX_RETRIES) {
+          break;
+        }
+
+        if (hasExceededDeadline()) {
+          return { fills: [], aborted: true };
+        }
+
+        const waitTime = deadline ? Math.min(backoff, Math.max(0, deadline - Date.now())) : backoff;
+        if (waitTime > 0) {
+          const aborted = await waitWithActivity({
+            durationMs: waitTime,
+            deadline,
+            onActivity,
+          });
+          if (aborted) {
+            return { fills: [], aborted: true };
+          }
+        }
         backoff = Math.min(backoff * 2, USER_FILLS_MAX_BACKOFF_MS);
         continue;
       }
@@ -222,29 +403,55 @@ async function getUserFills(address: string): Promise<any[]> {
         message: `API call for userFills failed for ${address}`,
         context: { status: response.status, attempt },
       });
-      return [];
+      return { fills: [], aborted: false };
     } catch (error: any) {
+      const isTimeout = error instanceof RequestTimeoutError;
       const message = error?.message ?? 'Unknown error';
+
       if (attempt >= USER_FILLS_MAX_RETRIES) {
         await log({
           level: 'ERROR',
           message: `Failed to fetch user fills for ${address}`,
-          context: { error: message, attempt },
+          context: { error: message, attempt, timeout: isTimeout },
         });
         break;
       }
 
-      await log({
-        level: 'WARN',
-        message: `Retrying user fills request for ${address}`,
-        context: { error: message, attempt },
-      });
-      await sleep(backoff);
+      if (isTimeout) {
+        await log({
+          level: 'WARN',
+          message: `Hyperliquid request timed out while fetching user fills for ${address}`,
+          context: { attempt, timeoutMs: HYPERLIQUID_REQUEST_TIMEOUT_MS },
+        });
+        registerHyperliquidPenalty(HYPERLIQUID_TIMEOUT_PENALTY_MS);
+      } else {
+        await log({
+          level: 'WARN',
+          message: `Retrying user fills request for ${address}`,
+          context: { error: message, attempt },
+        });
+      }
+
+      if (hasExceededDeadline()) {
+        return { fills: [], aborted: true };
+      }
+
+      const waitTime = deadline ? Math.min(backoff, Math.max(0, deadline - Date.now())) : backoff;
+      if (waitTime > 0) {
+        const aborted = await waitWithActivity({
+          durationMs: waitTime,
+          deadline,
+          onActivity,
+        });
+        if (aborted) {
+          return { fills: [], aborted: true };
+        }
+      }
       backoff = Math.min(backoff * 2, USER_FILLS_MAX_BACKOFF_MS);
     }
   }
 
-  return [];
+  return { fills: [], aborted: false };
 }
 
 async function sendTelegramMessage(signal: Signal, settings: Settings) {
@@ -280,29 +487,42 @@ ${signal.takeProfitTargets.map((tp, i) => `TP ${i + 1}: ${tp}`).join('\n')}
 
   for (const channelId of channels) {
     try {
-      const response = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: channelId,
-          text: message,
-          parse_mode: 'Markdown',
-        }),
-      });
+      const response = await fetchWithTimeout(
+        `https://api.telegram.org/bot${telegramBotToken}/sendMessage`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: channelId,
+            text: message,
+            parse_mode: 'Markdown',
+          }),
+        },
+        TELEGRAM_REQUEST_TIMEOUT_MS
+      );
 
       const result = (await response.json().catch(() => null)) as { ok?: boolean } | null;
-      if (result?.ok) {
+      if (response.ok && result?.ok) {
         await log({ level: 'INFO', message: `Telegram message sent to channel ${channelId} for signal ${signal.id}` });
       } else {
-        await log({ level: 'ERROR', message: `Failed to send message to channel ${channelId} for signal ${signal.id}`, context: result });
+        await log({
+          level: 'ERROR',
+          message: `Failed to send message to channel ${channelId} for signal ${signal.id}`,
+          context: { status: response.status, result },
+        });
       }
     } catch (error: any) {
-      await log({ level: 'ERROR', message: `Error sending message to channel ${channelId}`, context: { error: error.message } });
+      const isTimeout = error instanceof RequestTimeoutError;
+      await log({
+        level: 'ERROR',
+        message: `Error sending message to channel ${channelId}`,
+        context: { error: error.message, timeout: isTimeout, timeoutMs: TELEGRAM_REQUEST_TIMEOUT_MS },
+      });
     }
   }
 }
 
-export async function detectAndSaveSignals(): Promise<void> {
+export async function detectAndSaveSignals(options: DetectSignalsOptions = {}): Promise<void> {
   const walletsWithCooldown = await getTrackedWalletsWithCooldown();
   const trackedAddresses = walletsWithCooldown.map((wallet) => wallet.address);
   const settings = await getSettings();
@@ -310,14 +530,160 @@ export async function detectAndSaveSignals(): Promise<void> {
 
   if (trackedAddresses.length === 0 || minWalletCount <= 0 || timeWindow <= 0) {
     await log({ level: 'INFO', message: 'Signal detection skipped: Insufficient configuration or no tracked wallets.' });
+    await writeWorkerState({
+      nextWalletIndex: 0,
+      lastDetectionRunAt: new Date().toISOString(),
+      lastDetectionRunDurationMs: 0,
+    });
     return;
   }
 
-  const fillsByWallet = await Promise.all(
-    trackedAddresses.map((address) =>
-      getUserFills(address).then((fills) => ({ address, fills: fills || [] }))
-    )
+  const detectionStartedAt = Date.now();
+  const overallDeadlineCandidate = options.deadlineMs ?? Number.POSITIVE_INFINITY;
+  const fetchDeadlineCandidate = Math.min(
+    overallDeadlineCandidate,
+    detectionStartedAt + DETECTION_RUN_TIME_LIMIT_MS
   );
+  const fetchDeadline = Number.isFinite(fetchDeadlineCandidate)
+    ? fetchDeadlineCandidate
+    : undefined;
+  const overallDeadline = Number.isFinite(overallDeadlineCandidate)
+    ? overallDeadlineCandidate
+    : undefined;
+  const workerState = await readWorkerState();
+  const startIndex =
+    trackedAddresses.length > 0
+      ? workerState.nextWalletIndex % trackedAddresses.length
+      : 0;
+  const rotatedAddresses = [
+    ...trackedAddresses.slice(startIndex),
+    ...trackedAddresses.slice(0, startIndex),
+  ];
+  const maxWalletsThisRun = Math.min(rotatedAddresses.length, DETECTION_MAX_WALLETS_PER_RUN);
+  const addressesThisRun = rotatedAddresses.slice(0, maxWalletsThisRun);
+
+  const fillsByWallet: { address: string; fills: any[] }[] = [];
+  let detectionAborted = false;
+
+  const elapsed = () => Date.now() - detectionStartedAt;
+
+  const reportProgress = async (phase: DetectionProgressPhase, aborted: boolean) => {
+    if (!options.onProgress) {
+      return;
+    }
+
+    await options.onProgress({
+      processedWallets: fillsByWallet.length,
+      totalWallets: addressesThisRun.length,
+      durationMs: elapsed(),
+      phase,
+      aborted,
+    });
+  };
+
+  const fetchDeadlineExceeded = () => {
+    if (!fetchDeadline) {
+      return false;
+    }
+
+    if (Date.now() >= fetchDeadline) {
+      detectionAborted = true;
+      return true;
+    }
+
+    return false;
+  };
+
+  const overallDeadlineExceeded = () => {
+    if (!overallDeadline) {
+      return false;
+    }
+
+    if (Date.now() >= overallDeadline) {
+      detectionAborted = true;
+      return true;
+    }
+
+    return false;
+  };
+
+  const pulseFetchActivity = async () => {
+    await reportProgress('fetch', detectionAborted);
+  };
+
+  await reportProgress('fetch', false);
+
+  for (const address of addressesThisRun) {
+    if (fetchDeadlineExceeded()) {
+      detectionAborted = true;
+      break;
+    }
+
+    const result = await getUserFills(address, { deadline: fetchDeadline, onActivity: pulseFetchActivity });
+
+    if (result.aborted) {
+      detectionAborted = true;
+      break;
+    }
+
+    fillsByWallet.push({ address, fills: result.fills || [] });
+    await reportProgress('fetch', detectionAborted);
+
+    if (overallDeadlineExceeded()) {
+      break;
+    }
+  }
+
+  await advanceWorkerWalletCursor({
+    processedWallets: fillsByWallet.length,
+    totalWallets: trackedAddresses.length,
+  });
+
+  const detectionDurationMs = Date.now() - detectionStartedAt;
+  await writeWorkerState({
+    lastDetectionRunAt: new Date().toISOString(),
+    lastDetectionRunDurationMs: detectionDurationMs,
+  });
+
+  await reportProgress('aggregate', detectionAborted);
+
+  if (detectionAborted) {
+    await log({
+      level: 'WARN',
+      message: 'Signal detection aborted early due to runtime limits.',
+      context: {
+        processedWallets: fillsByWallet.length,
+        totalWallets: trackedAddresses.length,
+        durationMs: detectionDurationMs,
+        detectionDeadlineMs: fetchDeadline ?? null,
+        automationDeadlineMs: overallDeadline ?? null,
+        batchSizeLimit: DETECTION_MAX_WALLETS_PER_RUN,
+      },
+    });
+  } else if (detectionDurationMs >= DETECTION_RUN_WARNING_THRESHOLD_MS) {
+    await log({
+      level: 'WARN',
+      message: 'Signal detection run approached the runtime warning threshold.',
+      context: {
+        processedWallets: fillsByWallet.length,
+        totalWallets: trackedAddresses.length,
+        durationMs: detectionDurationMs,
+        warningThresholdMs: DETECTION_RUN_WARNING_THRESHOLD_MS,
+        batchSizeLimit: DETECTION_MAX_WALLETS_PER_RUN,
+      },
+    });
+  } else if (fillsByWallet.length > 0) {
+    await log({
+      level: 'INFO',
+      message: 'Signal detection processed wallet batch within limits.',
+      context: {
+        processedWallets: fillsByWallet.length,
+        totalWallets: trackedAddresses.length,
+        durationMs: detectionDurationMs,
+        batchSizeLimit: DETECTION_MAX_WALLETS_PER_RUN,
+      },
+    });
+  }
 
   const timeWindowMs = timeWindow * 60 * 1000;
   const cooldownMs = 2 * 60 * 60 * 1000;
@@ -325,8 +691,16 @@ export async function detectAndSaveSignals(): Promise<void> {
   const walletDataMap = new Map(walletsWithCooldown.map((wallet) => [wallet.address.toLowerCase(), wallet]));
 
   const recentOpeningFills: any[] = [];
-  fillsByWallet.forEach(({ address, fills }) => {
-    fills.forEach((fill: any) => {
+  for (const { address, fills } of fillsByWallet) {
+    if (overallDeadlineExceeded()) {
+      break;
+    }
+
+    for (const fill of fills) {
+      if (overallDeadlineExceeded()) {
+        break;
+      }
+
       const isRecent = now - fill.time < timeWindowMs;
       const classification = classifyFillForSignal(fill);
 
@@ -340,16 +714,27 @@ export async function detectAndSaveSignals(): Promise<void> {
           recentOpeningFills.push({ ...fill, walletAddress: address, signalType: classification.signalType });
         }
       }
-    });
-  });
+    }
+
+    if (detectionAborted) {
+      break;
+    }
+  }
+
+  await reportProgress('aggregate', detectionAborted);
 
   if (recentOpeningFills.length === 0) {
     await log({ level: 'INFO', message: 'No recent opening fills meeting criteria found.' });
+    await reportProgress('complete', detectionAborted);
     return;
   }
 
   const fillsByPosition = new Map<string, { type: SignalDirection; fills: any[] }>();
   for (const fill of recentOpeningFills) {
+    if (overallDeadlineExceeded()) {
+      break;
+    }
+
     const type: SignalDirection | undefined = fill.signalType;
     if (!type) {
       continue;
@@ -368,10 +753,20 @@ export async function detectAndSaveSignals(): Promise<void> {
   let newSignalsWereAdded = false;
 
   for (const { type: signalType, fills: positionFills } of fillsByPosition.values()) {
+    if (overallDeadlineExceeded()) {
+      break;
+    }
+
+    await reportProgress('aggregate', detectionAborted);
     const sortedFills = positionFills.sort((a, b) => a.time - b.time);
     let bestCluster: any[] | null = null;
 
     for (let i = 0; i < sortedFills.length; i++) {
+      if (overallDeadlineExceeded()) {
+        detectionAborted = true;
+        break;
+      }
+
       const anchorFill = sortedFills[i];
       const windowEnd = anchorFill.time + timeWindowMs;
       const windowFills = sortedFills.filter((fill) => fill.time >= anchorFill.time && fill.time < windowEnd);
@@ -381,6 +776,10 @@ export async function detectAndSaveSignals(): Promise<void> {
           bestCluster = windowFills;
         }
       }
+    }
+
+    if (detectionAborted) {
+      break;
     }
 
     if (!bestCluster) {
@@ -395,6 +794,11 @@ export async function detectAndSaveSignals(): Promise<void> {
       continue;
     }
 
+    if (overallDeadlineExceeded()) {
+      detectionAborted = true;
+      break;
+    }
+
     const { coin } = bestCluster[0];
     const type = signalType;
     const signalTimestamp = bestCluster.reduce((latest, fill) => Math.max(latest, fill.time), 0);
@@ -404,11 +808,21 @@ export async function detectAndSaveSignals(): Promise<void> {
       continue;
     }
 
+    if (overallDeadlineExceeded()) {
+      detectionAborted = true;
+      break;
+    }
+
     const participatingWallets = Array.from(new Set(bestCluster.map((fill) => fill.walletAddress)));
 
     const totalSize = bestCluster.reduce((acc, fill) => acc + Math.abs(parseFloat(fill.sz)), 0);
     const totalCost = bestCluster.reduce((acc, fill) => acc + parseFloat(fill.px) * Math.abs(parseFloat(fill.sz)), 0);
     const avgEntryPrice = totalSize > 0 ? totalCost / totalSize : 0;
+
+    if (overallDeadlineExceeded()) {
+      detectionAborted = true;
+      break;
+    }
 
     const currentPriceStr = await getMarkPrice(coin);
     const currentPrice = parseFloat(currentPriceStr);
@@ -469,9 +883,16 @@ export async function detectAndSaveSignals(): Promise<void> {
       clusterFills: bestCluster,
     };
 
+    if (overallDeadlineExceeded()) {
+      detectionAborted = true;
+      break;
+    }
+
     existingSignals.push(newSignal);
     await updateWalletCooldowns(participatingWallets, coin);
-    await sendTelegramMessage(newSignal, settings);
+    if (!overallDeadlineExceeded()) {
+      await sendTelegramMessage(newSignal, settings);
+    }
     newSignalsWereAdded = true;
   }
 
@@ -482,6 +903,8 @@ export async function detectAndSaveSignals(): Promise<void> {
   } else {
     await log({ level: 'INFO', message: 'No new signals detected in this run.' });
   }
+
+  await reportProgress('complete', detectionAborted);
 }
 
 export async function getSignals(): Promise<Signal[]> {
@@ -497,22 +920,49 @@ export async function deleteSignal(signalId: string): Promise<void> {
   await writeSignals(updated);
 }
 
-export async function updateSignalPrices(): Promise<Signal[]> {
+export async function updateSignalPrices(options: UpdateSignalPricesOptions = {}): Promise<Signal[]> {
+  const { deadlineMs, onProgress } = options;
+  const startedAt = Date.now();
+  const deadline = typeof deadlineMs === 'number' && Number.isFinite(deadlineMs) ? deadlineMs : undefined;
+
+  const elapsed = () => Date.now() - startedAt;
+  const reportProgress = async (progress: Omit<UpdateSignalPricesProgress, 'durationMs'>) => {
+    if (!onProgress) {
+      return;
+    }
+
+    await onProgress({ ...progress, durationMs: elapsed() });
+  };
+
+  const hasExceededDeadline = () => (deadline ? Date.now() >= deadline : false);
+
   const signals = await readSignals();
   const openSignals = signals.filter((signal) => signal.status === 'Open');
+  const uniqueCoins = Array.from(new Set(openSignals.map((signal) => signal.pair)));
+
+  await reportProgress({ stage: 'start', total: uniqueCoins.length });
+
   if (openSignals.length === 0) {
+    await reportProgress({ stage: 'complete', skipped: true, total: 0 });
     return signals;
   }
 
-  const uniqueCoins = Array.from(new Set(openSignals.map((signal) => signal.pair)));
-  const priceResults = await Promise.all(uniqueCoins.map((coin) => getMarkPrice(coin).then((price) => ({ coin, price }))));
-  const prices = priceResults.reduce<Record<string, number>>((acc, { coin, price }) => {
+  const prices: Record<string, number> = {};
+  for (let index = 0; index < uniqueCoins.length; index++) {
+    if (hasExceededDeadline()) {
+      await reportProgress({ stage: 'complete', skipped: true, total: uniqueCoins.length });
+      return signals;
+    }
+
+    const coin = uniqueCoins[index];
+    await reportProgress({ stage: 'coin', coin, index, total: uniqueCoins.length });
+
+    const price = await getMarkPrice(coin);
     const parsedPrice = parseFloat(price);
     if (!Number.isNaN(parsedPrice)) {
-      acc[coin] = parsedPrice;
+      prices[coin] = parsedPrice;
     }
-    return acc;
-  }, {});
+  }
 
   let signalsWereUpdated = false;
   let walletsWereUpdated = false;
@@ -608,6 +1058,8 @@ export async function updateSignalPrices(): Promise<Signal[]> {
   if (walletsWereUpdated) {
     await writeWallets(wallets);
   }
+
+  await reportProgress({ stage: 'complete', skipped: false, total: uniqueCoins.length });
 
   return updatedSignals;
 }
