@@ -5,10 +5,25 @@ import { detectAndSaveSignals, updateSignalPrices } from '@/server/services/sign
 import { log } from '@/server/services/logs';
 import {
   completeWorkerRun,
+  findActiveWorkerRun,
   markStaleWorkerRuns,
   registerWorkerRun,
+  touchWorkerRun,
 } from '@/server/services/workerRuns';
 import { setCloudflareEnv, type CloudflareBindings } from '@/server/storage/env';
+
+const AUTOMATION_TICK_TIME_LIMIT_MS = Math.max(
+  120_000,
+  Number(process.env.AUTOMATION_TICK_TIME_LIMIT_MS ?? 8 * 60_000)
+);
+const AUTOMATION_TICK_COMPLETION_BUFFER_MS = Math.max(
+  15_000,
+  Number(process.env.AUTOMATION_TICK_COMPLETION_BUFFER_MS ?? 30_000)
+);
+const AUTOMATION_ACTIVE_RUN_GRACE_MS = Math.max(
+  15_000,
+  Number(process.env.AUTOMATION_ACTIVE_RUN_GRACE_MS ?? 90_000)
+);
 
 export async function POST() {
   const context = getCloudflareContext({ async: false });
@@ -16,6 +31,7 @@ export async function POST() {
 
   const runId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const startedAt = Date.now();
+  const automationDeadline = startedAt + AUTOMATION_TICK_TIME_LIMIT_MS;
   let status: 'success' | 'error' = 'success';
 
   const staleRuns = await markStaleWorkerRuns({
@@ -35,14 +51,104 @@ export async function POST() {
     });
   }
 
+  const activeRun = await findActiveWorkerRun({
+    now: startedAt,
+    activityGraceMs: AUTOMATION_ACTIVE_RUN_GRACE_MS,
+  });
+
+  if (activeRun) {
+    await log({
+      level: 'WARN',
+      message: 'Cloudflare worker tick skipped because another run is active.',
+      context: {
+        runId,
+        activeRunId: activeRun.runId,
+        activeRunStartedAt: activeRun.startedAt,
+        activeRunUpdatedAt: activeRun.updatedAt,
+      },
+    });
+
+    return NextResponse.json(
+      {
+        status: 'skipped',
+        reason: 'active-run',
+        activeRunId: activeRun.runId,
+      },
+      { status: 202 }
+    );
+  }
+
   await registerWorkerRun({ runId, startedAt });
   await log({ level: 'INFO', message: 'Cloudflare worker tick started', context: { runId } });
 
   try {
+    const createHeartbeat = () => {
+      let lastBeat = 0;
+      return async (progress?: { durationMs?: number }) => {
+        const now = Date.now();
+        if (now - lastBeat < 2000 && !(progress?.durationMs && progress.durationMs >= 60_000)) {
+          return;
+        }
+
+        lastBeat = now;
+        await touchWorkerRun({ runId, durationMs: progress?.durationMs });
+      };
+    };
+
+    const heartbeat = createHeartbeat();
+    const durationSinceStart = () => Date.now() - startedAt;
+    const timeRemaining = () => automationDeadline - Date.now();
+    const detectionDeadline = Math.max(
+      startedAt + 60_000,
+      Math.min(automationDeadline - AUTOMATION_TICK_COMPLETION_BUFFER_MS, automationDeadline)
+    );
+
     await log({ level: 'INFO', message: 'Detecting new signals', context: { runId } });
-    await detectAndSaveSignals();
+    await detectAndSaveSignals({
+      deadlineMs: detectionDeadline,
+      onProgress: async ({ durationMs }) => {
+        await heartbeat({ durationMs });
+      },
+    });
+    await heartbeat({ durationMs: durationSinceStart() });
+
+    if (timeRemaining() <= AUTOMATION_TICK_COMPLETION_BUFFER_MS) {
+      await log({
+        level: 'WARN',
+        message: 'Skipping signal price update due to automation time limit proximity.',
+        context: {
+          runId,
+          durationMs: durationSinceStart(),
+          timeRemainingMs: timeRemaining(),
+          completionBufferMs: AUTOMATION_TICK_COMPLETION_BUFFER_MS,
+        },
+      });
+      return NextResponse.json({ status: 'partial', skipped: 'price-update' });
+    }
+
     await log({ level: 'INFO', message: 'Updating signal prices', context: { runId } });
-    await updateSignalPrices();
+    await heartbeat({ durationMs: durationSinceStart() });
+    await updateSignalPrices({
+      deadlineMs: automationDeadline,
+      onProgress: async (progress) => {
+        await heartbeat({ durationMs: progress.durationMs });
+        if (progress.stage === 'complete' && progress.skipped) {
+          await log({
+            level: 'WARN',
+            message: 'Signal price update ended early due to automation deadline.',
+            context: {
+              runId,
+              durationMs: progress.durationMs,
+              timeRemainingMs: timeRemaining(),
+              deadlineMs: AUTOMATION_TICK_TIME_LIMIT_MS,
+              coinsProcessed: progress.index !== undefined ? progress.index + 1 : undefined,
+              totalCoins: progress.total,
+            },
+          });
+        }
+      },
+    });
+    await heartbeat({ durationMs: durationSinceStart() });
     return NextResponse.json({ status: 'ok' });
   } catch (error) {
     const err = error as Error;
