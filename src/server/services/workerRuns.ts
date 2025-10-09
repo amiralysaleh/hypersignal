@@ -4,6 +4,8 @@ const WORKER_RUNS_FILE_PATH = 'worker-runs.json';
 const defaultRuns: WorkerRunRecord[] = [];
 const MAX_WORKER_RUN_RECORDS = 100;
 
+const DEFAULT_ACTIVE_RUN_GRACE_MS = 90_000;
+
 export type WorkerRunStatus = 'running' | 'success' | 'error' | 'timeout';
 
 export interface WorkerRunRecord {
@@ -20,7 +22,12 @@ async function readWorkerRuns(): Promise<WorkerRunRecord[]> {
 }
 
 async function writeWorkerRuns(runs: WorkerRunRecord[]): Promise<void> {
-  await writeJsonFile(WORKER_RUNS_FILE_PATH, runs.slice(0, MAX_WORKER_RUN_RECORDS));
+  try {
+    await writeJsonFile(WORKER_RUNS_FILE_PATH, runs.slice(0, MAX_WORKER_RUN_RECORDS));
+  } catch (error) {
+    console.warn('[workerRuns] Failed to persist worker runs', error);
+    throw error;
+  }
 }
 
 interface MarkStaleWorkerRunsOptions {
@@ -86,7 +93,54 @@ export async function registerWorkerRun({ runId, startedAt }: RegisterWorkerRunO
     ...runs.filter((run) => run.runId !== runId),
   ];
 
-  await writeWorkerRuns(updatedRuns);
+  try {
+    await writeWorkerRuns(updatedRuns);
+  } catch (error) {
+    console.warn(`[workerRuns] Failed to register worker run ${runId}`, error);
+    throw error;
+  }
+}
+
+interface TouchWorkerRunOptions {
+  runId: string;
+  durationMs?: number;
+}
+
+export async function touchWorkerRun({ runId, durationMs }: TouchWorkerRunOptions): Promise<void> {
+  const runs = await readWorkerRuns();
+  const nowIso = new Date().toISOString();
+
+  let runFound = false;
+  const updatedRuns = runs.map((run) => {
+    if (run.runId !== runId) {
+      return run;
+    }
+
+    runFound = true;
+    return {
+      ...run,
+      status: run.status === 'running' ? run.status : 'running',
+      updatedAt: nowIso,
+      ...(durationMs !== undefined ? { durationMs } : {}),
+    };
+  });
+
+  if (!runFound) {
+    updatedRuns.unshift({
+      runId,
+      status: 'running',
+      startedAt: nowIso,
+      updatedAt: nowIso,
+      ...(durationMs !== undefined ? { durationMs } : {}),
+    });
+  }
+
+  try {
+    await writeWorkerRuns(updatedRuns);
+  } catch (error) {
+    console.warn(`[workerRuns] Failed to touch worker run ${runId}`, error);
+    throw error;
+  }
 }
 
 interface CompleteWorkerRunOptions {
@@ -130,5 +184,45 @@ export async function completeWorkerRun({
     });
   }
 
-  await writeWorkerRuns(updatedRuns);
+  try {
+    await writeWorkerRuns(updatedRuns);
+  } catch (error) {
+    console.warn(`[workerRuns] Failed to complete worker run ${runId}`, error);
+    throw error;
+  }
+}
+
+interface FindActiveWorkerRunOptions {
+  now: number;
+  activityGraceMs?: number;
+}
+
+export async function findActiveWorkerRun({
+  now,
+  activityGraceMs = DEFAULT_ACTIVE_RUN_GRACE_MS,
+}: FindActiveWorkerRunOptions): Promise<WorkerRunRecord | null> {
+  const runs = await readWorkerRuns();
+  if (runs.length === 0) {
+    return null;
+  }
+
+  const grace = Math.max(5_000, activityGraceMs);
+  const recentThreshold = now - grace;
+
+  for (const run of runs) {
+    if (run.status !== 'running') {
+      continue;
+    }
+
+    const updatedAtMs = Date.parse(run.updatedAt);
+    if (!Number.isFinite(updatedAtMs)) {
+      continue;
+    }
+
+    if (updatedAtMs >= recentThreshold) {
+      return run;
+    }
+  }
+
+  return null;
 }

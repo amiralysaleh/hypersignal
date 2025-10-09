@@ -10,6 +10,7 @@
 
 import { ai } from '@/ai/genkit';
 import { log } from '@/app/(dashboard)/logs/actions';
+import { fetchWithTimeout, RequestTimeoutError } from '@/utils/fetchWithTimeout';
 import { z } from 'zod';
 
 const GetWalletDataInputSchema = z.object({
@@ -31,8 +32,11 @@ const getWalletDataFlow = ai.defineFlow(
     outputSchema: GetWalletDataOutputSchema,
   },
   async (input) => {
+    const timeoutMs = Math.max(5_000, Number(process.env.HYPERLIQUID_FLOW_TIMEOUT_MS ?? 15_000));
     try {
-      const response = await fetch('https://api.hyperliquid.xyz/info', {
+      const response = await fetchWithTimeout(
+        'https://api.hyperliquid.xyz/info',
+        {
           method: 'POST',
           headers: {
               'Content-Type': 'application/json',
@@ -41,7 +45,9 @@ const getWalletDataFlow = ai.defineFlow(
               type: 'clearinghouseState',
               user: input.address,
           }),
-      });
+        },
+        timeoutMs
+      );
 
       if (!response.ok) {
           const errorBody = await response.text();
@@ -82,7 +88,16 @@ const getWalletDataFlow = ai.defineFlow(
           positions,
       };
     } catch(e: any) {
-        await log({ level: 'ERROR', message: `Failed to fetch wallet data for ${input.address}`, context: { error: e.message, stack: e.stack } });
+        const error = e as Error;
+        const timeout = error instanceof RequestTimeoutError;
+        const message = timeout
+          ? `Hyperliquid request timed out after ${timeoutMs}ms`
+          : error.message;
+        await log({
+          level: 'ERROR',
+          message: `Failed to fetch wallet data for ${input.address}`,
+          context: { error: message, stack: error.stack, timeoutMs: timeout ? timeoutMs : undefined },
+        });
         throw new Error("Failed to fetch wallet data from Hyperliquid API. See logs for details.");
     }
   }

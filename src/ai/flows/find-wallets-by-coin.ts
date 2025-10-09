@@ -11,6 +11,7 @@
 import { ai } from '@/ai/genkit';
 import { getTrackedAddresses } from '@/app/(dashboard)/wallets/actions';
 import { log } from '@/app/(dashboard)/logs/actions';
+import { fetchWithTimeout, RequestTimeoutError } from '@/utils/fetchWithTimeout';
 import { z } from 'zod';
 
 const FindWalletsByCoinInputSchema = z.object({
@@ -37,13 +38,19 @@ const FindWalletsByCoinOutputSchema = z.object({
 export type FindWalletsByCoinOutput = z.infer<typeof FindWalletsByCoinOutputSchema>;
 
 
+const DEFAULT_FLOW_TIMEOUT_MS = Math.max(5_000, Number(process.env.HYPERLIQUID_FLOW_TIMEOUT_MS ?? 15_000));
+
 async function getFirstFillTimestamp(address: string, coin: string): Promise<string> {
     try {
-        const response = await fetch('https://api.hyperliquid.xyz/info', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: 'userFills', user: address }),
-        });
+        const response = await fetchWithTimeout(
+            'https://api.hyperliquid.xyz/info',
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ type: 'userFills', user: address }),
+            },
+            DEFAULT_FLOW_TIMEOUT_MS
+        );
         if (!response.ok) return new Date().toISOString();
         const fills = (await response.json().catch(() => null)) as unknown;
 
@@ -55,7 +62,7 @@ async function getFirstFillTimestamp(address: string, coin: string): Promise<str
         const coinFills = (fills as any[])
             .filter((f: any) => f && f.coin === coin)
             .sort((a: any, b: any) => (a?.time ?? 0) - (b?.time ?? 0));
-        
+
         if (coinFills.length > 0) {
             // Find the most recent fill that likely opened the current position.
             // This is a heuristic and may not be perfect for complex trade histories.
@@ -65,7 +72,7 @@ async function getFirstFillTimestamp(address: string, coin: string): Promise<str
             for(let i = coinFills.length - 1; i >= 0; i--) {
                 const fill = coinFills[i];
                 const fillSize = parseFloat(fill.sz) * (fill.side === "B" ? 1 : -1);
-                
+
                 // If adding this fill's size flips the sign or goes from zero, it's an opening trade
                 if (positionSize === 0 || (positionSize > 0 && positionSize + fillSize < 0) || (positionSize < 0 && positionSize + fillSize > 0)) {
                     openTime = fill.time;
@@ -77,10 +84,16 @@ async function getFirstFillTimestamp(address: string, coin: string): Promise<str
             }
              return new Date(openTime).toISOString();
         }
-        
+
         return new Date().toISOString();
-        
+
     } catch (e) {
+        const error = e as Error;
+        if (error instanceof RequestTimeoutError) {
+            console.warn('[findWalletsByCoin] userFills request timed out', { address, coin, timeoutMs: DEFAULT_FLOW_TIMEOUT_MS });
+        } else {
+            console.warn('[findWalletsByCoin] Failed to fetch user fills', { address, coin, error: error.message });
+        }
         return new Date().toISOString();
     }
 }
@@ -102,15 +115,44 @@ const findWalletsByCoinFlow = ai.defineFlow(
       const holdingPositions: WalletPosition[] = [];
       const coinUpperCase = input.coin.toUpperCase();
       
-      const statePromises = trackedAddresses.map((address) =>
-        fetch('https://api.hyperliquid.xyz/info', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: 'clearinghouseState', user: address }),
-        })
-          .then((res) => res.json().catch(() => null))
-          .then((data) => ({ address, data: data as Record<string, any> | null }))
-      );
+      const statePromises = trackedAddresses.map(async (address) => {
+        try {
+          const response = await fetchWithTimeout(
+            'https://api.hyperliquid.xyz/info',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ type: 'clearinghouseState', user: address }),
+            },
+            DEFAULT_FLOW_TIMEOUT_MS
+          );
+
+          if (!response.ok) {
+            const errorBody = await response.text();
+            await log({
+              level: 'WARN',
+              message: `Clearinghouse state request failed for ${address}`,
+              context: { status: response.status, body: errorBody },
+            });
+            return { address, data: null as Record<string, any> | null };
+          }
+
+          const data = (await response.json().catch(() => null)) as Record<string, any> | null;
+          return { address, data };
+        } catch (error: any) {
+          const err = error as Error;
+          const timeout = err instanceof RequestTimeoutError;
+          await log({
+            level: 'WARN',
+            message: `Failed to fetch clearinghouse state for ${address}`,
+            context: {
+              error: timeout ? `Hyperliquid request timed out after ${DEFAULT_FLOW_TIMEOUT_MS}ms` : err.message,
+              timeoutMs: timeout ? DEFAULT_FLOW_TIMEOUT_MS : undefined,
+            },
+          });
+          return { address, data: null as Record<string, any> | null };
+        }
+      });
 
       const results = await Promise.all(statePromises);
 

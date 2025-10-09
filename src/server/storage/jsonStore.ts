@@ -2,21 +2,70 @@ import { getCloudflareEnv } from './env';
 
 const TABLE_NAME = 'kv_store';
 const KEY_PREFIX = 'json:';
+const DB_OPERATION_TIMEOUT_MS = Math.max(1_000, Number(process.env.DB_OPERATION_TIMEOUT_MS ?? 5_000));
+
+export class DbTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DbTimeoutError';
+  }
+}
+
+async function withDbTimeout<T>(label: string, operation: () => Promise<T>): Promise<T> {
+  const timeoutMs = DB_OPERATION_TIMEOUT_MS;
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  let timedOut = false;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      timedOut = true;
+      reject(new DbTimeoutError(`D1 operation "${label}" timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  try {
+    const result = await Promise.race([operation(), timeoutPromise]);
+    return result as T;
+  } catch (error) {
+    if (timedOut) {
+      console.warn(`[jsonStore] ${label} exceeded timeout (${timeoutMs}ms)`);
+    }
+    throw error;
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
 
 async function ensureTable() {
   const { DB } = getCloudflareEnv();
-  await DB.prepare(
-    `CREATE TABLE IF NOT EXISTS ${TABLE_NAME} (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    )`
-  ).run();
+  try {
+    await withDbTimeout('ensureTable', () =>
+      DB.prepare(
+        `CREATE TABLE IF NOT EXISTS ${TABLE_NAME} (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        )`
+      ).run()
+    );
+  } catch (error) {
+    console.warn('[jsonStore] Failed to ensure kv_store table', error);
+    throw error;
+  }
 }
 
 async function ensureRow<T>(key: string, defaultValue: T) {
   const { DB } = getCloudflareEnv();
   await ensureTable();
-  await DB.prepare(`INSERT OR IGNORE INTO ${TABLE_NAME} (key, value) VALUES (?1, ?2)`).bind(key, JSON.stringify(defaultValue)).run();
+  try {
+    await withDbTimeout('ensureRow', () =>
+      DB.prepare(`INSERT OR IGNORE INTO ${TABLE_NAME} (key, value) VALUES (?1, ?2)`).bind(key, JSON.stringify(defaultValue)).run()
+    );
+  } catch (error) {
+    console.warn(`[jsonStore] Failed to ensure row for key ${key}`, error);
+    throw error;
+  }
 }
 
 function resolveKey(relativePath: string) {
@@ -32,7 +81,16 @@ export async function ensureFile<T>(relativePath: string, defaultValue: T): Prom
 export async function readJsonFile<T>(relativePath: string, defaultValue: T): Promise<T> {
   const key = await ensureFile(relativePath, defaultValue);
   const { DB } = getCloudflareEnv();
-  const row = await DB.prepare(`SELECT value FROM ${TABLE_NAME} WHERE key = ?1`).bind(key).first<{ value: string }>();
+  let row: { value: string } | null = null;
+
+  try {
+    row = await withDbTimeout('readJsonFile', () =>
+      DB.prepare(`SELECT value FROM ${TABLE_NAME} WHERE key = ?1`).bind(key).first<{ value: string }>()
+    );
+  } catch (error) {
+    console.warn(`[jsonStore] Failed to read key ${key}`, error);
+    throw error;
+  }
 
   if (!row || !row.value) {
     return defaultValue;
@@ -53,6 +111,7 @@ export async function readJsonFile<T>(relativePath: string, defaultValue: T): Pr
     }
     return parsed as T;
   } catch (error) {
+    console.warn(`[jsonStore] Failed to parse JSON for key ${key}, resetting to default.`, error);
     await writeJsonFile(relativePath, defaultValue);
     return defaultValue;
   }
@@ -62,5 +121,13 @@ export async function writeJsonFile<T>(relativePath: string, data: T): Promise<v
   const key = resolveKey(relativePath);
   const { DB } = getCloudflareEnv();
   await ensureTable();
-  await DB.prepare(`INSERT OR REPLACE INTO ${TABLE_NAME} (key, value) VALUES (?1, ?2)`).bind(key, JSON.stringify(data)).run();
+
+  try {
+    await withDbTimeout('writeJsonFile', () =>
+      DB.prepare(`INSERT OR REPLACE INTO ${TABLE_NAME} (key, value) VALUES (?1, ?2)`).bind(key, JSON.stringify(data)).run()
+    );
+  } catch (error) {
+    console.warn(`[jsonStore] Failed to write key ${key}`, error);
+    throw error;
+  }
 }

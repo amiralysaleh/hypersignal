@@ -1,4 +1,4 @@
-import { readJsonFile, writeJsonFile } from '../storage/jsonStore';
+import { DbTimeoutError, readJsonFile, writeJsonFile } from '../storage/jsonStore';
 
 const LOGS_FILE_PATH = 'logs.json';
 const defaultLogs: LogEntry[] = [];
@@ -24,6 +24,11 @@ async function persistLogWithRetry(entry: Omit<LogEntry, 'timestamp'>, attempt =
   try {
     await persistLog(entry);
   } catch (error) {
+    if (error instanceof DbTimeoutError) {
+      console.warn('[logs] D1 timeout while persisting log entry, aborting retries.');
+      throw error;
+    }
+
     if (attempt >= LOG_WRITE_RETRY_ATTEMPTS) {
       throw error;
     }
@@ -51,6 +56,7 @@ export async function log(entry: Omit<LogEntry, 'timestamp'>): Promise<void> {
     await logWriteQueue;
   } catch (error) {
     console.error('Failed to persist log entry', error);
+    throw error;
   }
 }
 
