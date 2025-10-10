@@ -777,20 +777,48 @@ export async function detectAndSaveSignals(options: DetectSignalsOptions = {}): 
     const sortedFills = positionFills.sort((a, b) => a.time - b.time);
     let bestCluster: any[] | null = null;
 
-    for (let i = 0; i < sortedFills.length; i++) {
+    const walletCounts = new Map<string, number>();
+    let startIndex = 0;
+    let bestUniqueWalletCount = 0;
+
+    for (let endIndex = 0; endIndex < sortedFills.length; endIndex++) {
       if (overallDeadlineExceeded()) {
         detectionAborted = true;
         break;
       }
 
-      const anchorFill = sortedFills[i];
-      const windowEnd = anchorFill.time + timeWindowMs;
-      const windowFills = sortedFills.filter((fill) => fill.time >= anchorFill.time && fill.time < windowEnd);
-      const uniqueWallets = new Set(windowFills.map((fill) => fill.walletAddress));
-      if (uniqueWallets.size >= minWalletCount) {
-        if (!bestCluster || uniqueWallets.size > new Set(bestCluster.map((fill) => fill.walletAddress)).size) {
-          bestCluster = windowFills;
+      const endFill = sortedFills[endIndex];
+      const endWallet = String(endFill.walletAddress ?? '__unknown__');
+      walletCounts.set(endWallet, (walletCounts.get(endWallet) ?? 0) + 1);
+
+      while (
+        startIndex <= endIndex &&
+        sortedFills[endIndex].time - sortedFills[startIndex].time >= timeWindowMs
+      ) {
+        const startFill = sortedFills[startIndex];
+        const startWallet = String(startFill.walletAddress ?? '__unknown__');
+        const remaining = (walletCounts.get(startWallet) ?? 0) - 1;
+        if (remaining > 0) {
+          walletCounts.set(startWallet, remaining);
+        } else {
+          walletCounts.delete(startWallet);
         }
+        startIndex += 1;
+
+        if (overallDeadlineExceeded()) {
+          detectionAborted = true;
+          break;
+        }
+      }
+
+      if (detectionAborted) {
+        break;
+      }
+
+      const uniqueWalletCount = walletCounts.size;
+      if (uniqueWalletCount >= minWalletCount && uniqueWalletCount > bestUniqueWalletCount) {
+        bestUniqueWalletCount = uniqueWalletCount;
+        bestCluster = sortedFills.slice(startIndex, endIndex + 1);
       }
     }
 
