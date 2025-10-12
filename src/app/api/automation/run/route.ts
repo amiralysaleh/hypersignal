@@ -10,6 +10,7 @@ import {
   registerWorkerRun,
   touchWorkerRun,
 } from '@/server/services/workerRuns';
+import { readWorkerState } from '@/server/services/workerState';
 import { setCloudflareEnv, type CloudflareBindings } from '@/server/storage/env';
 
 const AUTOMATION_TICK_TIME_LIMIT_MS = Math.max(
@@ -22,7 +23,11 @@ const AUTOMATION_TICK_COMPLETION_BUFFER_MS = Math.max(
 );
 const AUTOMATION_ACTIVE_RUN_GRACE_MS = Math.max(
   15_000,
-  Number(process.env.AUTOMATION_ACTIVE_RUN_GRACE_MS ?? 90_000)
+  Number(process.env.AUTOMATION_ACTIVE_RUN_GRACE_MS ?? 12 * 60_000)
+);
+const AUTOMATION_MIN_INTERVAL_MS = Math.max(
+  5 * 60_000,
+  Number(process.env.AUTOMATION_MIN_INTERVAL_MS ?? 10 * 60_000)
 );
 
 export async function POST() {
@@ -33,6 +38,47 @@ export async function POST() {
   const startedAt = Date.now();
   const automationDeadline = startedAt + AUTOMATION_TICK_TIME_LIMIT_MS;
   let status: 'success' | 'error' = 'success';
+
+  const workerState = await readWorkerState();
+  const lastDetectionRunStartedAt = workerState.lastDetectionRunStartedAt
+    ? Date.parse(workerState.lastDetectionRunStartedAt)
+    : NaN;
+  const lastDetectionRunCompletedAt = workerState.lastDetectionRunCompletedAt
+    ? Date.parse(workerState.lastDetectionRunCompletedAt)
+    : NaN;
+
+  const referenceTimestamp = Number.isFinite(lastDetectionRunStartedAt)
+    ? lastDetectionRunStartedAt
+    : lastDetectionRunCompletedAt;
+
+  if (Number.isFinite(referenceTimestamp)) {
+    const sinceLastRunMs = startedAt - referenceTimestamp;
+    if (sinceLastRunMs < AUTOMATION_MIN_INTERVAL_MS) {
+      const cooldownRemainingMs = AUTOMATION_MIN_INTERVAL_MS - sinceLastRunMs;
+      await log({
+        level: 'INFO',
+        message: 'Cloudflare worker tick skipped due to cooldown window.',
+        context: {
+          runId,
+          startedAt,
+          lastDetectionRunStartedAt: workerState.lastDetectionRunStartedAt,
+          lastDetectionRunCompletedAt: workerState.lastDetectionRunCompletedAt,
+          lastDetectionRunDurationMs: workerState.lastDetectionRunDurationMs,
+          cooldownRemainingMs,
+          minIntervalMs: AUTOMATION_MIN_INTERVAL_MS,
+        },
+      });
+
+      return NextResponse.json(
+        {
+          status: 'skipped',
+          reason: 'cooldown',
+          cooldownRemainingMs,
+        },
+        { status: 202 }
+      );
+    }
+  }
 
   const staleRuns = await markStaleWorkerRuns({
     now: startedAt,
