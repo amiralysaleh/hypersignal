@@ -4,7 +4,7 @@ import { readJsonFile, writeJsonFile } from '../storage/jsonStore';
 import { getTrackedWalletsWithCooldown, readWallets, updateWalletCooldowns, writeWallets } from './wallets';
 import { getSettings, Settings } from './settings';
 import { log } from './logs';
-import { advanceWorkerWalletCursor, readWorkerState, writeWorkerState } from './workerState';
+import { writeWorkerState } from './workerState';
 
 const HYPERLIQUID_MIN_REQUEST_INTERVAL_MS = Math.max(
   0,
@@ -39,11 +39,6 @@ const DETECTION_RUN_WARNING_THRESHOLD_MS = Math.max(
     DETECTION_RUN_TIME_LIMIT_MS
   )
 );
-const DETECTION_MAX_WALLETS_PER_RUN = Math.max(
-  1,
-  Number(process.env.DETECTION_MAX_WALLETS_PER_RUN ?? 20)
-);
-
 const TELEGRAM_REQUEST_TIMEOUT_MS = Math.max(
   5_000,
   Number(process.env.TELEGRAM_REQUEST_TIMEOUT_MS ?? 15_000)
@@ -566,17 +561,9 @@ export async function detectAndSaveSignals(options: DetectSignalsOptions = {}): 
   const overallDeadline = Number.isFinite(overallDeadlineCandidate)
     ? overallDeadlineCandidate
     : undefined;
-  const workerState = await readWorkerState();
-  const startIndex =
-    trackedAddresses.length > 0
-      ? workerState.nextWalletIndex % trackedAddresses.length
-      : 0;
-  const rotatedAddresses = [
-    ...trackedAddresses.slice(startIndex),
-    ...trackedAddresses.slice(0, startIndex),
-  ];
-  const maxWalletsThisRun = Math.min(rotatedAddresses.length, DETECTION_MAX_WALLETS_PER_RUN);
-  const addressesThisRun = rotatedAddresses.slice(0, maxWalletsThisRun);
+  const addressesThisRun = [...trackedAddresses];
+  const runtimeBudgetMs =
+    fetchDeadline !== undefined ? Math.max(fetchDeadline - detectionStartedAt, 0) : null;
 
   const fillsByWallet: { address: string; fills: any[] }[] = [];
   let detectionAborted = false;
@@ -650,15 +637,11 @@ export async function detectAndSaveSignals(options: DetectSignalsOptions = {}): 
     }
   }
 
-  await advanceWorkerWalletCursor({
-    processedWallets: fillsByWallet.length,
-    totalWallets: trackedAddresses.length,
-  });
-
   const detectionDurationMs = Date.now() - detectionStartedAt;
   await writeWorkerState({
     lastDetectionRunAt: new Date().toISOString(),
     lastDetectionRunDurationMs: detectionDurationMs,
+    nextWalletIndex: 0,
   });
 
   await reportProgress('aggregate', detectionAborted);
@@ -673,7 +656,7 @@ export async function detectAndSaveSignals(options: DetectSignalsOptions = {}): 
         durationMs: detectionDurationMs,
         detectionDeadlineMs: fetchDeadline ?? null,
         automationDeadlineMs: overallDeadline ?? null,
-        batchSizeLimit: DETECTION_MAX_WALLETS_PER_RUN,
+        runtimeBudgetMs,
       },
     });
   } else if (detectionDurationMs >= DETECTION_RUN_WARNING_THRESHOLD_MS) {
@@ -685,18 +668,18 @@ export async function detectAndSaveSignals(options: DetectSignalsOptions = {}): 
         totalWallets: trackedAddresses.length,
         durationMs: detectionDurationMs,
         warningThresholdMs: DETECTION_RUN_WARNING_THRESHOLD_MS,
-        batchSizeLimit: DETECTION_MAX_WALLETS_PER_RUN,
+        runtimeBudgetMs,
       },
     });
   } else if (fillsByWallet.length > 0) {
     await log({
       level: 'INFO',
-      message: 'Signal detection processed wallet batch within limits.',
+      message: 'Signal detection scanned all wallets within limits.',
       context: {
         processedWallets: fillsByWallet.length,
         totalWallets: trackedAddresses.length,
         durationMs: detectionDurationMs,
-        batchSizeLimit: DETECTION_MAX_WALLETS_PER_RUN,
+        runtimeBudgetMs,
       },
     });
   }

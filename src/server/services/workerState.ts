@@ -50,21 +50,3 @@ export async function writeWorkerState(state: Partial<WorkerState>): Promise<voi
   await writeJsonFile(WORKER_STATE_FILE_PATH, merged);
 }
 
-export async function advanceWorkerWalletCursor({
-  processedWallets,
-  totalWallets,
-}: {
-  processedWallets: number;
-  totalWallets: number;
-}): Promise<void> {
-  const current = await readWorkerState();
-  const baseIndex = normalizeIndex(current.nextWalletIndex, totalWallets);
-
-  if (totalWallets === 0 || processedWallets <= 0) {
-    await writeWorkerState({ nextWalletIndex: baseIndex });
-    return;
-  }
-
-  const nextIndex = (baseIndex + processedWallets) % totalWallets;
-  await writeWorkerState({ nextWalletIndex: nextIndex });
-}
