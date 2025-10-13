@@ -599,6 +599,19 @@ export async function detectAndSaveSignals(options: DetectSignalsOptions = {}): 
   const addressesThisRun = rotatedAddresses;
   const walletBatches = chunkArray(addressesThisRun, DETECTION_MAX_WALLETS_PER_RUN);
 
+  await log({
+    level: 'INFO',
+    message: `Signal detection run starting with ${addressesThisRun.length} wallet${
+      addressesThisRun.length === 1 ? '' : 's'
+    } scheduled for scanning.`,
+    context: {
+      plannedWalletsThisRun: addressesThisRun.length,
+      totalTrackedWallets: trackedAddresses.length,
+      batchSizeLimit: DETECTION_MAX_WALLETS_PER_RUN,
+      walletBatchCount: walletBatches.length,
+    },
+  });
+
   const fillsByWallet: { address: string; fills: any[] }[] = [];
   let detectionAborted = false;
 
