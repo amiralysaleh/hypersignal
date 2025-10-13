@@ -25,11 +25,15 @@ const AUTOMATION_ACTIVE_RUN_GRACE_MS = Math.max(
   Number(process.env.AUTOMATION_ACTIVE_RUN_GRACE_MS ?? 90_000)
 );
 
-export async function POST() {
-  const context = getCloudflareContext({ async: false });
-  setCloudflareEnv(context.env as CloudflareBindings);
+export interface AutomationTickOptions {
+  env: CloudflareBindings;
+  reason: string;
+}
 
-  const schedulerNamespace = (context.env as CloudflareBindings)?.AUTOMATION_SCHEDULER;
+export async function runAutomationTick({ env, reason }: AutomationTickOptions): Promise<Response> {
+  setCloudflareEnv(env);
+
+  const schedulerNamespace = env?.AUTOMATION_SCHEDULER;
   if (schedulerNamespace) {
     const schedulerStub = schedulerNamespace.get(schedulerNamespace.idFromName('automation'));
     schedulerStub
@@ -40,6 +44,7 @@ export async function POST() {
           message: 'Failed to refresh automation scheduler alarm after run invocation.',
           context: {
             error: error instanceof Error ? error.message : String(error),
+            reason,
           },
         });
       });
@@ -81,6 +86,7 @@ export async function POST() {
         activeRunId: activeRun.runId,
         activeRunStartedAt: activeRun.startedAt,
         activeRunUpdatedAt: activeRun.updatedAt,
+        reason,
       },
     });
 
@@ -95,7 +101,7 @@ export async function POST() {
   }
 
   await registerWorkerRun({ runId, startedAt });
-  await log({ level: 'INFO', message: 'Cloudflare worker tick started', context: { runId } });
+  await log({ level: 'INFO', message: 'Cloudflare worker tick started', context: { runId, reason } });
 
   try {
     const createHeartbeat = () => {
@@ -119,7 +125,7 @@ export async function POST() {
       Math.min(automationDeadline - AUTOMATION_TICK_COMPLETION_BUFFER_MS, automationDeadline)
     );
 
-    await log({ level: 'INFO', message: 'Detecting new signals', context: { runId } });
+    await log({ level: 'INFO', message: 'Detecting new signals', context: { runId, reason } });
     await detectAndSaveSignals({
       deadlineMs: detectionDeadline,
       onProgress: async ({ durationMs }) => {
@@ -137,12 +143,13 @@ export async function POST() {
           durationMs: durationSinceStart(),
           timeRemainingMs: timeRemaining(),
           completionBufferMs: AUTOMATION_TICK_COMPLETION_BUFFER_MS,
+          reason,
         },
       });
       return NextResponse.json({ status: 'partial', skipped: 'price-update' });
     }
 
-    await log({ level: 'INFO', message: 'Updating signal prices', context: { runId } });
+    await log({ level: 'INFO', message: 'Updating signal prices', context: { runId, reason } });
     await heartbeat({ durationMs: durationSinceStart() });
     await updateSignalPrices({
       deadlineMs: automationDeadline,
@@ -159,6 +166,7 @@ export async function POST() {
               deadlineMs: AUTOMATION_TICK_TIME_LIMIT_MS,
               coinsProcessed: progress.index !== undefined ? progress.index + 1 : undefined,
               totalCoins: progress.total,
+              reason,
             },
           });
         }
@@ -176,6 +184,7 @@ export async function POST() {
         runId,
         message: err.message,
         stack: err.stack,
+        reason,
       },
     });
     throw err;
@@ -189,7 +198,27 @@ export async function POST() {
         runId,
         status,
         durationMs,
+        reason,
       },
     });
   }
+}
+
+export async function POST(request: Request) {
+  const context = getCloudflareContext({ async: false });
+  const env = context.env as CloudflareBindings;
+  const reason = request.headers.get('cf-automation-trigger') ?? 'http-trigger';
+
+  return runAutomationTick({ env, reason });
+}
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __HYPERSIGNAL_AUTOMATION_TICK__:
+    | ((options: AutomationTickOptions) => Promise<Response>)
+    | undefined;
+}
+
+if (typeof globalThis !== 'undefined' && !globalThis.__HYPERSIGNAL_AUTOMATION_TICK__) {
+  globalThis.__HYPERSIGNAL_AUTOMATION_TICK__ = runAutomationTick;
 }
