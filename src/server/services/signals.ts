@@ -87,6 +87,27 @@ const hyperliquidBaseUrl = 'https://api.hyperliquid.xyz/info';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function chunkArray<T>(items: readonly T[], chunkSize: number): T[][] {
+  if (items.length === 0) {
+    return [];
+  }
+
+  const normalizedSize = Number.isFinite(chunkSize)
+    ? Math.max(1, Math.floor(chunkSize))
+    : items.length;
+
+  if (normalizedSize >= items.length) {
+    return [items.slice()];
+  }
+
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += normalizedSize) {
+    chunks.push(items.slice(index, index + normalizedSize));
+  }
+
+  return chunks;
+}
+
 function parseRetryAfterMs(headerValue: string | null | undefined): number | null {
   if (!headerValue) {
     return null;
@@ -575,8 +596,8 @@ export async function detectAndSaveSignals(options: DetectSignalsOptions = {}): 
     ...trackedAddresses.slice(startIndex),
     ...trackedAddresses.slice(0, startIndex),
   ];
-  const maxWalletsThisRun = Math.min(rotatedAddresses.length, DETECTION_MAX_WALLETS_PER_RUN);
-  const addressesThisRun = rotatedAddresses.slice(0, maxWalletsThisRun);
+  const addressesThisRun = rotatedAddresses;
+  const walletBatches = chunkArray(addressesThisRun, DETECTION_MAX_WALLETS_PER_RUN);
 
   const fillsByWallet: { address: string; fills: any[] }[] = [];
   let detectionAborted = false;
@@ -629,24 +650,29 @@ export async function detectAndSaveSignals(options: DetectSignalsOptions = {}): 
 
   await reportProgress('fetch', false);
 
-  for (const address of addressesThisRun) {
-    if (fetchDeadlineExceeded()) {
-      detectionAborted = true;
-      break;
-    }
+  walletLoop: for (const batch of walletBatches) {
+    for (const address of batch) {
+      if (fetchDeadlineExceeded()) {
+        detectionAborted = true;
+        break walletLoop;
+      }
 
-    const result = await getUserFills(address, { deadline: fetchDeadline, onActivity: pulseFetchActivity });
+      const result = await getUserFills(address, {
+        deadline: fetchDeadline,
+        onActivity: pulseFetchActivity,
+      });
 
-    if (result.aborted) {
-      detectionAborted = true;
-      break;
-    }
+      if (result.aborted) {
+        detectionAborted = true;
+        break walletLoop;
+      }
 
-    fillsByWallet.push({ address, fills: result.fills || [] });
-    await reportProgress('fetch', detectionAborted);
+      fillsByWallet.push({ address, fills: result.fills || [] });
+      await reportProgress('fetch', detectionAborted);
 
-    if (overallDeadlineExceeded()) {
-      break;
+      if (overallDeadlineExceeded()) {
+        break walletLoop;
+      }
     }
   }
 
@@ -674,6 +700,8 @@ export async function detectAndSaveSignals(options: DetectSignalsOptions = {}): 
         detectionDeadlineMs: fetchDeadline ?? null,
         automationDeadlineMs: overallDeadline ?? null,
         batchSizeLimit: DETECTION_MAX_WALLETS_PER_RUN,
+        plannedWalletsThisRun: addressesThisRun.length,
+        walletBatchCount: walletBatches.length,
       },
     });
   } else if (detectionDurationMs >= DETECTION_RUN_WARNING_THRESHOLD_MS) {
@@ -686,6 +714,8 @@ export async function detectAndSaveSignals(options: DetectSignalsOptions = {}): 
         durationMs: detectionDurationMs,
         warningThresholdMs: DETECTION_RUN_WARNING_THRESHOLD_MS,
         batchSizeLimit: DETECTION_MAX_WALLETS_PER_RUN,
+        plannedWalletsThisRun: addressesThisRun.length,
+        walletBatchCount: walletBatches.length,
       },
     });
   } else if (fillsByWallet.length > 0) {
@@ -697,6 +727,8 @@ export async function detectAndSaveSignals(options: DetectSignalsOptions = {}): 
         totalWallets: trackedAddresses.length,
         durationMs: detectionDurationMs,
         batchSizeLimit: DETECTION_MAX_WALLETS_PER_RUN,
+        plannedWalletsThisRun: addressesThisRun.length,
+        walletBatchCount: walletBatches.length,
       },
     });
   }
