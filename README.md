@@ -4,7 +4,7 @@ HyperSignal is a Next.js dashboard that monitors Hyperliquid wallets, clusters f
 
 - **Cloudflare Workers (OpenNext)** serve the Next.js dashboard, API routes, and background automation from a single worker script.
 - **Cloudflare D1** stores all persistent state (signals, wallets, settings, analytics, logs) and is exposed to the worker under the binding name `DB`.
-- **Cloudflare Workers Cron** triggers the same worker every five minutes so detection continues 24/7 even when no browser is open.
+- **Cloudflare Workers Cron** triggers the same worker every ten minutes so detection continues 24/7 even when no browser is open.
 
 ## Prerequisites
 
@@ -49,13 +49,14 @@ Use `npm run upload` if you only want to push the assets without publishing, or 
 ### 3. Verify the live dashboard
 
 1. Open the worker's deployed URL. The dashboard will call the bundled API routes which talk to D1.
-2. Use the **Workers → Triggers** tab to confirm the cron schedule (`*/5 * * * *`) is active.
+2. Use the **Workers → Triggers** tab to confirm the cron schedule (`*/10 * * * *`) is active.
 3. Inspect the **Logs** tab or the in-app Logs page to confirm the automation route runs on every cron tick.
 
 ## Architecture overview
 
 - **Cloudflare-first persistence** – `src/server/storage/jsonStore.ts` stores structured JSON data in the D1 table `kv_store`, so every part of the app (UI, APIs, worker automation) shares the same durable backend.
-- **Automation inside the Worker** – `src/app/api/automation/run/route.ts` encapsulates the background job. Cron triggers call this route through the generated worker, reusing the same service layer and logging progress back into D1.
+- **Automation inside the Worker** – `src/app/api/automation/run/route.ts` encapsulates the background job. Cron triggers call this route through the generated worker, reusing the same service layer and logging progress back into D1. The route now enforces a cooldown aligned with the 10-minute cron so free-tier Workers never overlap.
+- **Runtime-aware signal detection** – `src/server/services/signals.ts` scales its runtime budget based on the number of tracked wallets, ensuring every scan completes even on the Cloudflare free tier. The defaults can be tuned with `DETECTION_MIN_RUNTIME_BUDGET_MS` and `DETECTION_RUNTIME_BUDGET_PER_WALLET_MS` if you need to expand or tighten the window.
 - **API consumption from the UI** – Front-end pages call the REST endpoints served by the Next.js app on Cloudflare Workers. Because everything runs on the same origin you don’t need extra configuration—the dashboard simply polls `/api/**` routes.
 
 ## Useful scripts
