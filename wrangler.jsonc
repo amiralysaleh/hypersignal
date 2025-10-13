@@ -14,6 +14,9 @@
     ]
   },
   "migrations": [
-    { "tag": "20241013_automation_scheduler", "new_classes": ["AutomationScheduler"] }
+    {
+      "tag": "20241013_automation_scheduler",
+      "new_sqlite_classes": ["AutomationScheduler"]
+    }
   ]
 }
