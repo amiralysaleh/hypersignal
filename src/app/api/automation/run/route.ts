@@ -29,6 +29,22 @@ export async function POST() {
   const context = getCloudflareContext({ async: false });
   setCloudflareEnv(context.env as CloudflareBindings);
 
+  const schedulerNamespace = (context.env as CloudflareBindings)?.AUTOMATION_SCHEDULER;
+  if (schedulerNamespace) {
+    const schedulerStub = schedulerNamespace.get(schedulerNamespace.idFromName('automation'));
+    schedulerStub
+      .fetch('https://automation.scheduler/bootstrap', { method: 'POST' })
+      .catch(async (error) => {
+        await log({
+          level: 'WARN',
+          message: 'Failed to refresh automation scheduler alarm after run invocation.',
+          context: {
+            error: error instanceof Error ? error.message : String(error),
+          },
+        });
+      });
+  }
+
   const runId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const startedAt = Date.now();
   const automationDeadline = startedAt + AUTOMATION_TICK_TIME_LIMIT_MS;

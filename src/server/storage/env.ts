@@ -2,6 +2,7 @@ import { getCloudflareContext } from '@opennextjs/cloudflare';
 
 export interface CloudflareBindings extends CloudflareEnv {
   DB: D1Database;
+  AUTOMATION_SCHEDULER?: DurableObjectNamespace;
 }
 
 let explicitEnv: CloudflareBindings | null = null;

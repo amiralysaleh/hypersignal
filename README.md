@@ -4,7 +4,7 @@ HyperSignal is a Next.js dashboard that monitors Hyperliquid wallets, clusters f
 
 - **Cloudflare Workers (OpenNext)** serve the Next.js dashboard, API routes, and background automation from a single worker script.
 - **Cloudflare D1** stores all persistent state (signals, wallets, settings, analytics, logs) and is exposed to the worker under the binding name `DB`.
-- **Cloudflare Workers Cron** triggers the same worker every five minutes so detection continues 24/7 even when no browser is open.
+- **Cloudflare Durable Objects + Alarms** keep the automation loop running continuously without relying on cron triggers. The Durable Object schedules alarms, calls the automation route, and reschedules itself after every run.
 
 ## Prerequisites
 
@@ -38,10 +38,10 @@ npm run preview   # Builds with OpenNext and runs wrangler dev + assets
 
 ### 2. Deploy the Worker
 
-All deployment commands are driven by OpenNext through Wrangler. They compile the Next.js application, generate the `.open-next` worker bundle, patch in the cron handler, and push everything to Cloudflare.
+All deployment commands are driven by OpenNext through Wrangler. They compile the Next.js application, generate the `.open-next` worker bundle, patch in the Durable Object scheduler, and push everything to Cloudflare.
 
 ```bash
-npm run deploy   # Builds via OpenNext, patches cron handler, and deploys with wrangler
+npm run deploy   # Builds via OpenNext, patches Durable Object scheduler, and deploys with wrangler
 ```
 
 Use `npm run upload` if you only want to push the assets without publishing, or `npm run preview` to run Wrangler's preview environment locally before promoting.
@@ -49,13 +49,13 @@ Use `npm run upload` if you only want to push the assets without publishing, or 
 ### 3. Verify the live dashboard
 
 1. Open the worker's deployed URL. The dashboard will call the bundled API routes which talk to D1.
-2. Use the **Workers → Triggers** tab to confirm the cron schedule (`*/5 * * * *`) is active.
-3. Inspect the **Logs** tab or the in-app Logs page to confirm the automation route runs on every cron tick.
+2. From your terminal run `curl -X POST https://<your-worker-domain>/api/automation/bootstrap` (or trigger the same route via the dashboard once available). This instantiates the Durable Object and schedules the first alarm.
+3. Inspect the **Logs** tab or the in-app Logs page to confirm the automation route executes after each alarm.
 
 ## Architecture overview
 
 - **Cloudflare-first persistence** – `src/server/storage/jsonStore.ts` stores structured JSON data in the D1 table `kv_store`, so every part of the app (UI, APIs, worker automation) shares the same durable backend.
-- **Automation inside the Worker** – `src/app/api/automation/run/route.ts` encapsulates the background job. Cron triggers call this route through the generated worker, reusing the same service layer and logging progress back into D1.
+- **Automation inside the Worker** – `src/app/api/automation/run/route.ts` encapsulates the background job. The Durable Object alarm calls this route through the generated worker, reusing the same service layer and logging progress back into D1.
 - **API consumption from the UI** – Front-end pages call the REST endpoints served by the Next.js app on Cloudflare Workers. Because everything runs on the same origin you don’t need extra configuration—the dashboard simply polls `/api/**` routes.
 
 ## Useful scripts
@@ -71,11 +71,13 @@ npm run cf:typegen # Generate cloudflare-env.d.ts from Wrangler bindings
 
 ## Manual worker testing
 
-Wrangler can execute the cron handler locally so you can validate automation without deploying:
+Wrangler can run the automation scheduler locally so you can validate signal detection without deploying:
 
 ```bash
 npx wrangler d1 migrations apply hypersignal --local
-npx wrangler dev --test-scheduled
+npx wrangler dev
+# In another terminal once wrangler dev is running:
+curl -X POST http://127.0.0.1:8787/api/automation/bootstrap
 ```
 
-This spins up the worker, injects a temporary D1 database and executes the scheduled job so you can verify signal detection without pushing to production.
+Wrangler will emulate the worker, D1, and Durable Object locally. Bootstrapping schedules the first alarm; subsequent alarms will continue without additional intervention.
