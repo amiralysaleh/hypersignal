@@ -968,6 +968,7 @@ export async function updateSignalPrices(options: UpdateSignalPricesOptions = {}
   const { deadlineMs, onProgress } = options;
   const startedAt = Date.now();
   const deadline = typeof deadlineMs === 'number' && Number.isFinite(deadlineMs) ? deadlineMs : undefined;
+  let abortedDueToDeadline = false;
 
   const elapsed = () => Date.now() - startedAt;
   const reportProgress = async (progress: Omit<UpdateSignalPricesProgress, 'durationMs'>) => {
@@ -987,6 +988,11 @@ export async function updateSignalPrices(options: UpdateSignalPricesOptions = {}
   await reportProgress({ stage: 'start', total: uniqueCoins.length });
 
   if (openSignals.length === 0) {
+    await log({
+      level: 'INFO',
+      message: 'Signal price update skipped: no open signals to evaluate.',
+      context: { elapsedMs: elapsed() },
+    });
     await reportProgress({ stage: 'complete', skipped: true, total: 0 });
     return signals;
   }
@@ -994,6 +1000,17 @@ export async function updateSignalPrices(options: UpdateSignalPricesOptions = {}
   const prices: Record<string, number> = {};
   for (let index = 0; index < uniqueCoins.length; index++) {
     if (hasExceededDeadline()) {
+      abortedDueToDeadline = true;
+      await log({
+        level: 'WARN',
+        message: 'Signal price update aborted before completing price fetches due to runtime limit.',
+        context: {
+          processedCoins: index,
+          totalCoins: uniqueCoins.length,
+          elapsedMs: elapsed(),
+          deadlineMs: deadline ?? null,
+        },
+      });
       await reportProgress({ stage: 'complete', skipped: true, total: uniqueCoins.length });
       return signals;
     }
@@ -1011,6 +1028,8 @@ export async function updateSignalPrices(options: UpdateSignalPricesOptions = {}
   let signalsWereUpdated = false;
   let walletsWereUpdated = false;
   const wallets = await readWallets();
+  let processedSignals = 0;
+  let statusChanges = 0;
 
   const updatedSignals = signals.map((signal) => {
     if (signal.status !== 'Open') {
@@ -1023,6 +1042,7 @@ export async function updateSignalPrices(options: UpdateSignalPricesOptions = {}
     }
 
     signalsWereUpdated = true;
+    processedSignals += 1;
 
     const entryPrice = parseFloat(signal.entryPrice);
     const size = parseFloat(signal.size);
@@ -1049,6 +1069,7 @@ export async function updateSignalPrices(options: UpdateSignalPricesOptions = {}
     const finalPrice = currentPrice;
     const pnl = (finalPrice - entryPrice) * size * (signal.type === 'LONG' ? 1 : -1);
     const roi = margin > 0 ? (pnl / margin) * 100 : 0;
+    const statusChanged = newStatus !== signal.status;
 
     if (newStatus !== 'Open') {
       walletsWereUpdated = true;
@@ -1086,6 +1107,10 @@ export async function updateSignalPrices(options: UpdateSignalPricesOptions = {}
       }
     }
 
+    if (statusChanged) {
+      statusChanges += 1;
+    }
+
     return {
       ...signal,
       status: newStatus,
@@ -1104,6 +1129,23 @@ export async function updateSignalPrices(options: UpdateSignalPricesOptions = {}
   }
 
   await reportProgress({ stage: 'complete', skipped: false, total: uniqueCoins.length });
+
+  if (!abortedDueToDeadline) {
+    await log({
+      level: 'INFO',
+      message: signalsWereUpdated
+        ? 'Signal price update completed successfully.'
+        : 'Signal price update completed with no changes detected.',
+      context: {
+        elapsedMs: elapsed(),
+        coinsQueried: uniqueCoins.length,
+        openSignals: openSignals.length,
+        processedSignals,
+        statusChanges,
+        walletsUpdated: walletsWereUpdated,
+      },
+    });
+  }
 
   return updatedSignals;
 }
