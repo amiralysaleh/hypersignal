@@ -10,8 +10,22 @@ declare global {
     prepare(query: string): D1PreparedStatement;
   }
 
+  interface DurableObjectId {
+    toString(): string;
+  }
+
+  interface DurableObjectStub {
+    fetch(input: RequestInfo, init?: RequestInit): Promise<Response>;
+  }
+
+  interface DurableObjectNamespace {
+    idFromName(name: string): DurableObjectId;
+    get(id: DurableObjectId): DurableObjectStub;
+  }
+
   interface CloudflareEnv {
     DB: D1Database;
+    AUTOMATION_SCHEDULER?: DurableObjectNamespace;
     [key: string]: unknown;
   }
 }

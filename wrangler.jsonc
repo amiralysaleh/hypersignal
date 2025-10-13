@@ -8,5 +8,12 @@
   "d1_databases": [
     { "binding": "DB", "database_name": "hypersignal", "database_id": "a1346ba1-4968-413a-81d0-ba49779f635a" }
   ],
-  "triggers": { "crons": ["*/5 * * * *"] }
+  "durable_objects": {
+    "bindings": [
+      { "name": "AUTOMATION_SCHEDULER", "class_name": "AutomationScheduler" }
+    ]
+  },
+  "migrations": [
+    { "tag": "20241013_automation_scheduler", "new_classes": ["AutomationScheduler"] }
+  ]
 }
