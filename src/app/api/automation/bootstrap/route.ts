@@ -4,7 +4,7 @@ import { getCloudflareContext } from '@opennextjs/cloudflare';
 import { setCloudflareEnv, type CloudflareBindings } from '@/server/storage/env';
 import { log } from '@/server/services/logs';
 
-export async function POST() {
+export async function POST(request: Request) {
   const context = getCloudflareContext({ async: false });
   const env = context.env as CloudflareBindings;
   setCloudflareEnv(env);
@@ -25,8 +25,19 @@ export async function POST() {
   const stub = namespace.get(namespace.idFromName('automation'));
 
   let schedulerResponse: Response;
+  const requestOrigin = (() => {
+    try {
+      return new URL(request.url).origin;
+    } catch (error) {
+      return null;
+    }
+  })();
+  const bootstrapRequestInit: RequestInit = { method: 'POST' };
+  if (requestOrigin) {
+    bootstrapRequestInit.headers = { 'cf-worker-origin': requestOrigin };
+  }
   try {
-    schedulerResponse = await stub.fetch('https://automation.scheduler/bootstrap', { method: 'POST' });
+    schedulerResponse = await stub.fetch('https://automation.scheduler/bootstrap', bootstrapRequestInit);
   } catch (error) {
     await log({
       level: 'ERROR',
