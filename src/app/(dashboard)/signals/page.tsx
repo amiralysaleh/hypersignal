@@ -44,173 +44,228 @@ const updateSignalPricesApi = () => requestJson<Signal[]>('/api/signals/update-p
 const deleteSignalApi = (id: string) =>
   requestJson<{ success: boolean }>(`/api/signals/${encodeURIComponent(id)}`, { method: 'DELETE' });
 
-const SignalCard = ({ signal, onDelete }: { signal: Signal; onDelete: () => Promise<void> | void; }) => {
-    const isProfitable = parseFloat(signal.pnl) >= 0;
-    const signalTime = parseISO(signal.timestamp);
-    const { toast } = useToast();
+const SignalCard = ({
+  signal,
+  onDelete,
+}: {
+  signal: Signal;
+  onDelete: () => Promise<void> | void;
+}) => {
+  const isProfitable = parseFloat(signal.pnl) >= 0;
+  const signalTime = parseISO(signal.timestamp);
+  const { toast } = useToast();
 
-    const handleDelete = async () => {
-        if (!confirm('Are you sure you want to delete this signal? This will remove it from view permanently.')) {
-            return;
-        }
-        try {
-            await deleteSignalApi(signal.id);
-            toast({
-                title: 'Success',
-                description: 'Signal deleted successfully.',
-            });
-            await onDelete();
-        } catch (error) {
-             toast({
-                variant: 'destructive',
-                title: 'Error',
-                description: 'Failed to delete signal.',
-            });
-        }
+  const handleDelete = async () => {
+    if (
+      !confirm(
+        'Are you sure you want to delete this signal? This will remove it from view permanently.'
+      )
+    ) {
+      return;
     }
-    
-    const getStatusBadge = () => {
-        switch (signal.status) {
-            case 'Open':
-                return <Badge variant="secondary">Open</Badge>
-            case 'TP':
-                return <Badge className="bg-green-600 text-white">Take Profit</Badge>
-            case 'SL':
-                return <Badge variant="destructive">Stop Loss</Badge>
-        }
+
+    try {
+      await deleteSignalApi(signal.id);
+      toast({
+        title: 'Success',
+        description: 'Signal deleted successfully.',
+      });
+      await onDelete();
+    } catch (error) {
+      toast({
+        variant: 'destructive',
+        title: 'Error',
+        description: 'Failed to delete signal.',
+      });
     }
-    
-    const walletVolumes = React.useMemo<Record<string, number>>(() => {
-        if (!signal.clusterFills) return {};
+  };
 
-        return signal.clusterFills.reduce((acc, fill) => {
-            const address = fill.walletAddress;
-            const size = Math.abs(parseFloat(fill.sz));
-            if (!acc[address]) {
-                acc[address] = 0;
-            }
-            acc[address] += size;
-            return acc;
-        }, {} as Record<string, number>);
+  const getStatusBadge = () => {
+    switch (signal.status) {
+      case 'Open':
+        return <Badge variant="secondary">Open</Badge>;
+      case 'TP':
+        return <Badge className="bg-green-600 text-white">Take Profit</Badge>;
+      case 'SL':
+        return <Badge variant="destructive">Stop Loss</Badge>;
+      default:
+        return null;
+    }
+  };
 
-    }, [signal.clusterFills]);
-    
-    return (
-        <Card className={cn(signal.status !== 'Open' && "bg-muted/50 dark:bg-background/50")}>
-            <CardHeader>
-                <div className="flex flex-col md:flex-row items-start justify-between gap-4">
-                    <div className="flex flex-col gap-2">
-                         <div className="flex items-center gap-3">
-                            <Badge
-                                variant={signal.type === 'SHORT' ? 'destructive' : 'default'}
-                                className={cn(
-                                    "text-lg py-1 px-4",
-                                    signal.type === 'LONG' && "bg-green-600 text-white hover:bg-green-600/80"
-                                )}
-                            >
-                                {signal.type}
-                            </Badge>
-                            <CardTitle className="text-2xl">{signal.pair}-USDC</CardTitle>
-                        </div>
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <Clock className="w-4 h-4" />
-                            <span>Signal generated {formatDistanceToNow(signalTime, { addSuffix: true })}</span>
-                        </div>
-                    </div>
-                   
-                    <div className="flex flex-wrap items-center gap-4 w-full md:w-auto md:justify-end">
-                        <div className="flex items-center gap-2 text-right">
-                           {getStatusBadge()}
-                        </div>
-                         <div className="flex items-center gap-2 text-right">
-                             <Users className="w-5 h-5 text-muted-foreground" />
-                             <p className="text-lg font-semibold text-muted-foreground">{signal.contributingWallets} Wallets</p>
-                         </div>
-                         <Button variant="ghost" size="icon" onClick={handleDelete} aria-label="Delete Signal" className="md:ml-auto">
-                             <Trash2 className="w-5 h-5 text-destructive" />
-                         </Button>
-                    </div>
-                </div>
-            </CardHeader>
-            <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {/* Column 1: Core Signal Info */}
-                    <div className="space-y-4">
-                         <h4 className="font-semibold text-center md:text-left">Position Details</h4>
-                         <div className="flex justify-between items-center">
-                            <span className="text-muted-foreground text-sm flex items-center gap-2"><TrendingUp className="w-4 h-4" />Avg. Entry Price</span>
-                            <span className="font-mono font-medium">${signal.entryPrice}</span>
-                         </div>
-                         <div className="flex justify-between items-center">
-                            <span className="text-muted-foreground text-sm flex items-center gap-2"><DollarSign className="w-4 h-4" />Current Price</span>
-                            <span className="font-mono font-medium">${signal.currentPrice}</span>
-                         </div>
-                          <div className="flex justify-between items-center">
-                            <span className="text-muted-foreground text-sm flex items-center gap-2"><Target className="w-4 h-4" />Avg. Liq. Price</span>
-                            <span className="font-mono font-medium">{signal.liquidationPrice}</span>
-                         </div>
-                    </div>
-                    {/* Column 2: Financials */}
-                     <div className="space-y-4">
-                         <h4 className="font-semibold text-center md:text-left">Financials</h4>
-                         <div className="flex justify-between items-center">
-                            <span className="text-muted-foreground text-sm flex items-center gap-2"><Layers className="w-4 h-4" />Total Margin</span>
-                            <span className="font-mono font-medium">${signal.margin}</span>
-                         </div>
-                          <div className="flex justify-between items-center">
-                            <span className="text-muted-foreground text-sm flex items-center gap-2"><Layers className="w-4 h-4" />Avg. Leverage</span>
-                            <span className="font-mono font-medium">{signal.leverage}x</span>
-                         </div>
-                         <div className="flex justify-between items-center">
-                            <span className="text-muted-foreground text-sm flex items-center gap-2">
-                                {isProfitable ? <ArrowUp className="w-4 h-4 text-green-600" /> : <ArrowDown className="w-4 h-4 text-destructive" />}
-                                {signal.status === 'Open' ? "Unrealized PnL / ROI" : "Final PnL / ROI"}
-                            </span>
-                            <span className={`font-mono font-bold text-lg ${isProfitable ? 'text-green-600' : 'text-destructive'}`}>${parseFloat(signal.pnl).toFixed(2)} ({parseFloat(signal.roi).toFixed(2)}%)</span>
-                         </div>
-                    </div>
-                    {/* Column 3: Targets */}
-                    <div className="space-y-4">
-                        <h4 className="font-semibold text-center md:text-left">Targets</h4>
-                         <div className="flex justify-between items-center">
-                            <span className="text-destructive text-sm flex items-center gap-2"><Target className="w-4 h-4" />Stop Loss</span>
-                            <span className="font-mono font-medium">${signal.stopLoss}</span>
-                         </div>
-                         {signal.takeProfitTargets.map((tp, index) => (
-                             <div key={index} className="flex justify-between items-center">
-                                <span className="text-green-600 text-sm flex items-center gap-2"><Target className="w-4 h-4" />Take Profit {index + 1}</span>
-                                <span className="font-mono font-medium">${tp}</span>
-                            </div>
-                         ))}
-                    </div>
+  const walletVolumes = React.useMemo<Record<string, number>>(() => {
+    if (!signal.clusterFills) {
+      return {};
+    }
 
-                </div>
+    return signal.clusterFills.reduce((acc, fill) => {
+      const address = fill.walletAddress;
+      const size = Math.abs(parseFloat(fill.sz));
 
-            </CardContent>
-            <CardFooter>
-                <Accordion type="single" collapsible className="w-full">
-                    <AccordionItem value="item-1" className="border-t">
-                        <AccordionTrigger>
-                           <div className="flex items-center gap-2 text-sm font-medium">
-                                See Wallets ({signal.contributingWallets})
-                           </div>
-                        </AccordionTrigger>
-                        <AccordionContent>
-                           <div className="p-4 bg-muted rounded-md font-mono text-xs space-y-2 max-h-48 overflow-y-auto">
-                                {Object.entries(walletVolumes).map(([address, volume]) => (
-                                    <div key={address} className="flex justify-between">
-                                        <span>{address}</span>
-                                        <span className="font-semibold">{volume.toLocaleString(undefined, { maximumFractionDigits: 2 })} {signal.pair}</span>
-                                    </div>
-                                ))}
-                           </div>
-                        </AccordionContent>
-                    </AccordionItem>
-                </Accordion>
-            </CardFooter>
-        </Card>
-    );
-}
+      if (!acc[address]) {
+        acc[address] = 0;
+      }
+
+      acc[address] += size;
+      return acc;
+    }, {} as Record<string, number>);
+  }, [signal.clusterFills]);
+
+  return (
+    <Card
+      className={cn(
+        'transition-transform duration-300 hover:-translate-y-1',
+        signal.status !== 'Open' && 'bg-muted/50 dark:bg-background/50'
+      )}
+    >
+      <CardHeader>
+        <div className="flex flex-col items-start justify-between gap-4 md:flex-row">
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-3">
+              <Badge
+                variant={signal.type === 'SHORT' ? 'destructive' : 'default'}
+                className={cn(
+                  'py-1 px-4 text-base sm:text-lg',
+                  signal.type === 'LONG' && 'bg-green-600 text-white hover:bg-green-600/80'
+                )}
+              >
+                {signal.type}
+              </Badge>
+              <CardTitle className="text-xl font-semibold sm:text-2xl">
+                {signal.pair}-USDC
+              </CardTitle>
+            </div>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Clock className="h-4 w-4" />
+              <span>Signal generated {formatDistanceToNow(signalTime, { addSuffix: true })}</span>
+            </div>
+          </div>
+
+          <div className="flex w-full flex-wrap items-center gap-4 md:w-auto md:justify-end">
+            <div className="flex items-center gap-2 text-right">{getStatusBadge()}</div>
+            <div className="flex items-center gap-2 text-right">
+              <Users className="h-5 w-5 text-muted-foreground" />
+              <p className="text-lg font-semibold text-muted-foreground">
+                {signal.contributingWallets} Wallets
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleDelete}
+              aria-label="Delete Signal"
+              className="md:ml-auto"
+            >
+              <Trash2 className="h-5 w-5 text-destructive" />
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+
+      <CardContent>
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+          <div className="space-y-4">
+            <h4 className="text-center font-semibold md:text-left">Position Details</h4>
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-2 text-sm text-muted-foreground">
+                <TrendingUp className="h-4 w-4" /> Avg. Entry Price
+              </span>
+              <span className="font-mono font-medium">${signal.entryPrice}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-2 text-sm text-muted-foreground">
+                <DollarSign className="h-4 w-4" /> Current Price
+              </span>
+              <span className="font-mono font-medium">${signal.currentPrice}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Target className="h-4 w-4" /> Avg. Liq. Price
+              </span>
+              <span className="font-mono font-medium">{signal.liquidationPrice}</span>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <h4 className="text-center font-semibold md:text-left">Financials</h4>
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Layers className="h-4 w-4" /> Total Margin
+              </span>
+              <span className="font-mono font-medium">${signal.margin}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Layers className="h-4 w-4" /> Avg. Leverage
+              </span>
+              <span className="font-mono font-medium">{signal.leverage}x</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-2 text-sm text-muted-foreground">
+                {isProfitable ? (
+                  <ArrowUp className="h-4 w-4 text-green-600" />
+                ) : (
+                  <ArrowDown className="h-4 w-4 text-destructive" />
+                )}
+                {signal.status === 'Open' ? 'Unrealized PnL / ROI' : 'Final PnL / ROI'}
+              </span>
+              <span
+                className={cn(
+                  'text-lg font-mono font-bold',
+                  isProfitable ? 'text-green-600' : 'text-destructive'
+                )}
+              >
+                ${parseFloat(signal.pnl).toFixed(2)} ({parseFloat(signal.roi).toFixed(2)}%)
+              </span>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <h4 className="text-center font-semibold md:text-left">Targets</h4>
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-2 text-sm text-destructive">
+                <Target className="h-4 w-4" /> Stop Loss
+              </span>
+              <span className="font-mono font-medium">${signal.stopLoss}</span>
+            </div>
+            {signal.takeProfitTargets.map((tp, index) => (
+              <div key={index} className="flex items-center justify-between">
+                <span className="flex items-center gap-2 text-sm text-green-600">
+                  <Target className="h-4 w-4" /> Take Profit {index + 1}
+                </span>
+                <span className="font-mono font-medium">${tp}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </CardContent>
+
+      <CardFooter>
+        <Accordion type="single" collapsible className="w-full">
+          <AccordionItem value="item-1" className="border-t">
+            <AccordionTrigger>
+              <div className="flex items-center gap-2 text-sm font-medium">
+                See Wallets ({signal.contributingWallets})
+              </div>
+            </AccordionTrigger>
+            <AccordionContent>
+              <div className="max-h-48 space-y-2 overflow-y-auto rounded-md bg-muted p-4 font-mono text-xs">
+                {Object.entries(walletVolumes).map(([address, volume]) => (
+                  <div key={address} className="flex justify-between">
+                    <span>{address}</span>
+                    <span className="font-semibold">
+                      {volume.toLocaleString(undefined, { maximumFractionDigits: 2 })} {signal.pair}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
+      </CardFooter>
+    </Card>
+  );
+};
 
 export default function SignalsPage() {
   const { toast } = useToast();

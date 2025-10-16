@@ -1,12 +1,22 @@
 import { NextResponse } from 'next/server';
-import { getCloudflareContext } from '@opennextjs/cloudflare';
 
 import { setCloudflareEnv, type CloudflareBindings } from '@/server/storage/env';
 import { log } from '@/server/services/logs';
 
+async function resolveCloudflareEnv(): Promise<CloudflareBindings> {
+  try {
+    const module = await import(/* webpackIgnore: true */ '@opennextjs/cloudflare');
+    const context = module.getCloudflareContext({ async: false });
+    return context.env as CloudflareBindings;
+  } catch (error) {
+    throw new Error(
+      'The @opennextjs/cloudflare package is required at runtime to access Cloudflare bindings. Ensure it is installed and available.'
+    );
+  }
+}
+
 export async function POST(request: Request) {
-  const context = getCloudflareContext({ async: false });
-  const env = context.env as CloudflareBindings;
+  const env = await resolveCloudflareEnv();
   setCloudflareEnv(env);
 
   if (!env?.AUTOMATION_SCHEDULER) {

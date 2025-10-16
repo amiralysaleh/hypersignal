@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { getCloudflareContext } from '@opennextjs/cloudflare';
 
 import { detectAndSaveSignals, updateSignalPrices } from '@/server/services/signals';
 import { log } from '@/server/services/logs';
@@ -28,6 +27,18 @@ const AUTOMATION_ACTIVE_RUN_GRACE_MS = Math.max(
 export interface AutomationTickOptions {
   env: CloudflareBindings;
   reason: string;
+}
+
+async function resolveCloudflareEnv(): Promise<CloudflareBindings> {
+  try {
+    const module = await import(/* webpackIgnore: true */ '@opennextjs/cloudflare');
+    const context = module.getCloudflareContext({ async: false });
+    return context.env as CloudflareBindings;
+  } catch (error) {
+    throw new Error(
+      'The @opennextjs/cloudflare package is required at runtime to access Cloudflare bindings. Ensure it is installed and available.'
+    );
+  }
 }
 
 export async function runAutomationTick({ env, reason }: AutomationTickOptions): Promise<Response> {
@@ -205,8 +216,7 @@ export async function runAutomationTick({ env, reason }: AutomationTickOptions):
 }
 
 export async function POST(request: Request) {
-  const context = getCloudflareContext({ async: false });
-  const env = context.env as CloudflareBindings;
+  const env = await resolveCloudflareEnv();
   const reason = request.headers.get('cf-automation-trigger') ?? 'http-trigger';
 
   return runAutomationTick({ env, reason });
