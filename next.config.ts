@@ -1,6 +1,5 @@
 import type { NextConfig } from 'next';
 import withPWA from 'next-pwa';
-import { initOpenNextCloudflareForDev } from '@opennextjs/cloudflare';
 
 const withConfiguredPWA = withPWA({
   dest: 'public',
@@ -29,7 +28,9 @@ const nextConfig: NextConfig = withConfiguredPWA({
 });
 
 if (process.env.NODE_ENV === 'development') {
-  void initOpenNextCloudflareForDev();
+  void import('@opennextjs/cloudflare')
+    .then(({ initOpenNextCloudflareForDev }) => initOpenNextCloudflareForDev())
+    .catch(() => undefined);
 }
 
 export default nextConfig;

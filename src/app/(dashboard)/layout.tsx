@@ -39,8 +39,11 @@ export default function DashboardLayout({
       <SidebarInset className="bg-transparent">
         <Header />
         <div className="flex-1 overflow-y-auto">
-          <div className="relative mx-auto flex w-full max-w-7xl flex-1 flex-col px-4 pb-10 pt-6 sm:px-6 lg:px-8">
-            <div className="pointer-events-none absolute inset-x-2 inset-y-3 -z-10 rounded-[2rem] border border-border/40 bg-background/85 shadow-[0_30px_120px_-40px_rgb(15_23_42/0.45)] backdrop-blur-sm dark:border-border/20 dark:bg-background/70" />
+          <div className="page-shell relative flex flex-1 flex-col">
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 -z-10 rounded-[2.5rem] border border-border/50 bg-background/80 shadow-[0_45px_140px_-60px_rgba(15,23,42,0.6)] backdrop-blur dark:border-border/20 dark:bg-background/65"
+            />
             <div className="relative flex flex-1 flex-col gap-6">
               {children}
             </div>

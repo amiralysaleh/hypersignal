@@ -32,13 +32,13 @@ export default function PerformancePage() {
 
   return (
     <div className="flex flex-col gap-6">
-       <div className="flex items-center justify-between">
-        <div>
+       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="space-y-1">
           <h1 className="text-2xl font-bold tracking-tight">Performance Analytics</h1>
           <p className="text-muted-foreground">Analyze performance of tracked wallets.</p>
         </div>
         <Select value={timeframe} onValueChange={setTimeframe}>
-          <SelectTrigger className="w-[180px]">
+          <SelectTrigger className="w-full md:w-[180px]">
             <SelectValue placeholder="Select timeframe" />
           </SelectTrigger>
           <SelectContent>
@@ -56,46 +56,48 @@ export default function PerformancePage() {
           <CardDescription>Top performing wallets by PnL.</CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Rank</TableHead>
-                <TableHead>Wallet</TableHead>
-                <TableHead className="text-right">Success Rate</TableHead>
-                <TableHead className="text-right">Total PnL</TableHead>
-                <TableHead className="text-right">Total Trades</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                [...Array(5)].map((_, i) => (
-                  <TableRow key={i}>
-                    <TableCell><Skeleton className="h-5 w-5" /></TableCell>
-                    <TableCell><Skeleton className="h-5 w-48" /></TableCell>
-                    <TableCell className="text-right"><Skeleton className="h-5 w-16 ml-auto" /></TableCell>
-                    <TableCell className="text-right"><Skeleton className="h-5 w-20 ml-auto" /></TableCell>
-                    <TableCell className="text-right"><Skeleton className="h-5 w-12 ml-auto" /></TableCell>
-                  </TableRow>
-                ))
-              ) : performanceData.length === 0 ? (
+          <div className="overflow-x-auto">
+            <Table className="min-w-[680px]">
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center">No data available.</TableCell>
+                  <TableHead>Rank</TableHead>
+                  <TableHead>Wallet</TableHead>
+                  <TableHead className="text-right">Success Rate</TableHead>
+                  <TableHead className="text-right">Total PnL</TableHead>
+                  <TableHead className="text-right">Total Trades</TableHead>
                 </TableRow>
-              ) : (
-                performanceData.map((wallet) => (
-                  <TableRow key={wallet.rank}>
-                    <TableCell className="font-bold">{wallet.rank}</TableCell>
-                    <TableCell className="font-mono">{wallet.address}</TableCell>
-                    <TableCell className="text-right">{wallet.successRate}%</TableCell>
-                    <TableCell className={`text-right font-medium ${wallet.pnl >= 0 ? 'text-green-600' : 'text-destructive'}`}>
-                      ${wallet.pnl.toFixed(2)}
-                    </TableCell>
-                    <TableCell className="text-right">{wallet.trades}</TableCell>
+              </TableHeader>
+              <TableBody>
+                {loading ? (
+                  [...Array(5)].map((_, i) => (
+                    <TableRow key={i}>
+                      <TableCell><Skeleton className="h-5 w-5" /></TableCell>
+                      <TableCell><Skeleton className="h-5 w-48" /></TableCell>
+                      <TableCell className="text-right"><Skeleton className="ml-auto h-5 w-16" /></TableCell>
+                      <TableCell className="text-right"><Skeleton className="ml-auto h-5 w-20" /></TableCell>
+                      <TableCell className="text-right"><Skeleton className="ml-auto h-5 w-12" /></TableCell>
+                    </TableRow>
+                  ))
+                ) : performanceData.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center">No data available.</TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+                ) : (
+                  performanceData.map((wallet) => (
+                    <TableRow key={wallet.rank}>
+                      <TableCell className="font-bold">{wallet.rank}</TableCell>
+                      <TableCell className="font-mono text-sm md:text-base">{wallet.address}</TableCell>
+                      <TableCell className="text-right">{wallet.successRate}%</TableCell>
+                      <TableCell className={`text-right font-medium ${wallet.pnl >= 0 ? 'text-green-600' : 'text-destructive'}`}>
+                        ${wallet.pnl.toFixed(2)}
+                      </TableCell>
+                      <TableCell className="text-right">{wallet.trades}</TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
     </div>
