@@ -1,4 +1,5 @@
 import { getSignals } from './signals';
+import type { SignalClusterFill } from './signals';
 
 export interface WalletPerformance {
   rank: number;
@@ -41,7 +42,10 @@ export async function getPerformanceData(timeframe: string): Promise<WalletPerfo
       const isWin = signal.status === 'TP';
 
       const totalSignalSize = signal.clusterFills
-        ? signal.clusterFills.reduce((acc: number, fill: any) => acc + Math.abs(parseFloat(fill.sz)), 0)
+        ? signal.clusterFills.reduce(
+            (acc: number, fill: SignalClusterFill) => acc + Math.abs(parseFloat(fill.sz)),
+            0
+          )
         : signal.contributingWalletAddresses.length;
 
       if (totalSignalSize <= 0) {
@@ -59,7 +63,7 @@ export async function getPerformanceData(timeframe: string): Promise<WalletPerfo
       }
 
       if (signal.clusterFills) {
-        signal.clusterFills.forEach((fill: any) => {
+        signal.clusterFills.forEach((fill: SignalClusterFill) => {
           const fillSize = Math.abs(parseFloat(fill.sz));
           if (fillSize <= 0) {
             return;
