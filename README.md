@@ -80,4 +80,4 @@ npx wrangler dev
 curl -X POST http://127.0.0.1:8787/api/automation/bootstrap
 ```
 
-Wrangler will emulate the worker, D1, and Durable Object locally. Bootstrapping schedules the first alarm; subsequent alarms will continue without additional intervention.
+Wrangler will emulate the worker, D1, and Durable Object locally. Bootstrapping schedules the first alarm; subsequent alarms will continue without additional intervention

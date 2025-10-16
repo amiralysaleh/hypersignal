@@ -577,16 +577,6 @@ export async function detectAndSaveSignals(options: DetectSignalsOptions = {}): 
 
   const detectionStartedAt = Date.now();
   const overallDeadlineCandidate = options.deadlineMs ?? Number.POSITIVE_INFINITY;
-  const fetchDeadlineCandidate = Math.min(
-    overallDeadlineCandidate,
-    detectionStartedAt + DETECTION_RUN_TIME_LIMIT_MS
-  );
-  const fetchDeadline = Number.isFinite(fetchDeadlineCandidate)
-    ? fetchDeadlineCandidate
-    : undefined;
-  const overallDeadline = Number.isFinite(overallDeadlineCandidate)
-    ? overallDeadlineCandidate
-    : undefined;
   const workerState = await readWorkerState();
   const startIndex =
     trackedAddresses.length > 0
@@ -598,6 +588,19 @@ export async function detectAndSaveSignals(options: DetectSignalsOptions = {}): 
   ];
   const addressesThisRun = rotatedAddresses;
   const walletBatches = chunkArray(addressesThisRun, DETECTION_MAX_WALLETS_PER_RUN);
+  const walletBatchCount = Math.max(walletBatches.length, 1);
+  const dynamicRunTimeLimitMs = walletBatchCount * DETECTION_RUN_TIME_LIMIT_MS;
+  const detectionWarningThresholdMs = walletBatchCount * DETECTION_RUN_WARNING_THRESHOLD_MS;
+  const fetchDeadlineCandidate = Math.min(
+    overallDeadlineCandidate,
+    detectionStartedAt + dynamicRunTimeLimitMs
+  );
+  const fetchDeadline = Number.isFinite(fetchDeadlineCandidate)
+    ? fetchDeadlineCandidate
+    : undefined;
+  const overallDeadline = Number.isFinite(overallDeadlineCandidate)
+    ? overallDeadlineCandidate
+    : undefined;
 
   await log({
     level: 'INFO',
@@ -608,7 +611,9 @@ export async function detectAndSaveSignals(options: DetectSignalsOptions = {}): 
       plannedWalletsThisRun: addressesThisRun.length,
       totalTrackedWallets: trackedAddresses.length,
       batchSizeLimit: DETECTION_MAX_WALLETS_PER_RUN,
-      walletBatchCount: walletBatches.length,
+      walletBatchCount,
+      runtimeLimitMs: dynamicRunTimeLimitMs,
+      runtimeWarningThresholdMs: detectionWarningThresholdMs,
     },
   });
 
@@ -714,10 +719,12 @@ export async function detectAndSaveSignals(options: DetectSignalsOptions = {}): 
         automationDeadlineMs: overallDeadline ?? null,
         batchSizeLimit: DETECTION_MAX_WALLETS_PER_RUN,
         plannedWalletsThisRun: addressesThisRun.length,
-        walletBatchCount: walletBatches.length,
+        walletBatchCount,
+        runTimeLimitMs: dynamicRunTimeLimitMs,
+        warningThresholdMs: detectionWarningThresholdMs,
       },
     });
-  } else if (detectionDurationMs >= DETECTION_RUN_WARNING_THRESHOLD_MS) {
+  } else if (detectionDurationMs >= detectionWarningThresholdMs) {
     await log({
       level: 'WARN',
       message: 'Signal detection run approached the runtime warning threshold.',
@@ -725,10 +732,11 @@ export async function detectAndSaveSignals(options: DetectSignalsOptions = {}): 
         processedWallets: fillsByWallet.length,
         totalWallets: trackedAddresses.length,
         durationMs: detectionDurationMs,
-        warningThresholdMs: DETECTION_RUN_WARNING_THRESHOLD_MS,
+        warningThresholdMs: detectionWarningThresholdMs,
         batchSizeLimit: DETECTION_MAX_WALLETS_PER_RUN,
         plannedWalletsThisRun: addressesThisRun.length,
-        walletBatchCount: walletBatches.length,
+        walletBatchCount,
+        runTimeLimitMs: dynamicRunTimeLimitMs,
       },
     });
   } else if (fillsByWallet.length > 0) {
