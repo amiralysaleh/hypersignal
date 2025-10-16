@@ -209,6 +209,7 @@ async function scheduleHyperliquidRequest<T>(task: () => Promise<T>): Promise<T>
 }
 
 const SIGNALS_FILE_PATH = 'signals.json';
+const MAX_STORED_SIGNALS = Math.max(1, Number(process.env.MAX_STORED_SIGNALS ?? 200));
 
 type SignalDirection = 'LONG' | 'SHORT';
 
@@ -250,6 +251,11 @@ function classifyFillForSignal(fill: any): { signalType: SignalDirection } | nul
   return null;
 }
 
+export interface SignalClusterFill {
+  walletAddress: string;
+  sz: string;
+}
+
 export interface Signal {
   id: string;
   pair: string;
@@ -268,17 +274,117 @@ export interface Signal {
   contributingWalletAddresses: string[];
   takeProfitTargets: string[];
   stopLoss: string;
-  clusterFills?: any[];
+  clusterFills?: SignalClusterFill[];
 }
 
 const defaultSignals: Signal[] = [];
 
+type SignalWithUnknownCluster = Omit<Signal, 'clusterFills' | 'contributingWalletAddresses' | 'contributingWallets'> & {
+  clusterFills?: unknown;
+  contributingWalletAddresses?: unknown;
+  contributingWallets?: unknown;
+};
+
+function normalizeClusterFills(fills: unknown): SignalClusterFill[] | undefined {
+  if (!Array.isArray(fills)) {
+    return undefined;
+  }
+
+  const contributions = new Map<string, number>();
+
+  for (const rawFill of fills) {
+    if (!rawFill) {
+      continue;
+    }
+
+    const fill = rawFill as Record<string, unknown>;
+    const wallet = typeof fill.walletAddress === 'string' && fill.walletAddress.trim().length > 0
+      ? fill.walletAddress.trim()
+      : undefined;
+    if (!wallet) {
+      continue;
+    }
+
+    const sizeSource = fill.sz ?? fill.size;
+    const parsedSize =
+      typeof sizeSource === 'number'
+        ? sizeSource
+        : typeof sizeSource === 'string'
+          ? Number.parseFloat(sizeSource)
+          : NaN;
+
+    if (!Number.isFinite(parsedSize)) {
+      continue;
+    }
+
+    const absolute = Math.abs(parsedSize);
+    if (absolute <= 0) {
+      continue;
+    }
+
+    contributions.set(wallet, (contributions.get(wallet) ?? 0) + absolute);
+  }
+
+  if (contributions.size === 0) {
+    return undefined;
+  }
+
+  return Array.from(contributions.entries()).map(([walletAddress, totalSize]) => ({
+    walletAddress,
+    sz: totalSize.toString(),
+  }));
+}
+
+function normalizeSignal(signal: SignalWithUnknownCluster): Signal {
+  const contributingWalletAddresses = Array.isArray(signal.contributingWalletAddresses)
+    ? signal.contributingWalletAddresses
+        .map((address) => (typeof address === 'string' ? address : String(address ?? '')))
+        .filter((address) => address.trim().length > 0)
+    : [];
+
+  const clusterFills = normalizeClusterFills(signal.clusterFills);
+
+  const normalized: Signal = {
+    ...(signal as Signal),
+    contributingWalletAddresses,
+    contributingWallets:
+      typeof signal.contributingWallets === 'number' && Number.isFinite(signal.contributingWallets)
+        ? signal.contributingWallets
+        : contributingWalletAddresses.length,
+    clusterFills: clusterFills ?? undefined,
+  };
+
+  return normalized;
+}
+
+function resolveTimestamp(value: string): number {
+  if (typeof value !== 'string') {
+    return 0;
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeSignals(signals: readonly SignalWithUnknownCluster[]): Signal[] {
+  return signals
+    .map((signal) => normalizeSignal(signal))
+    .sort((a, b) => resolveTimestamp(b.timestamp) - resolveTimestamp(a.timestamp))
+    .slice(0, MAX_STORED_SIGNALS);
+}
+
 async function readSignals(): Promise<Signal[]> {
-  return readJsonFile(SIGNALS_FILE_PATH, defaultSignals);
+  const signals = await readJsonFile(SIGNALS_FILE_PATH, defaultSignals);
+  if (!Array.isArray(signals)) {
+    return defaultSignals;
+  }
+
+  return normalizeSignals(signals as SignalWithUnknownCluster[]);
 }
 
 async function writeSignals(signals: Signal[]): Promise<void> {
-  await writeJsonFile(SIGNALS_FILE_PATH, signals);
+  const normalized = normalizeSignals(signals);
+  await writeJsonFile(SIGNALS_FILE_PATH, normalized);
 }
 
 async function getMarkPrice(coin: string): Promise<string> {
@@ -977,7 +1083,7 @@ export async function detectAndSaveSignals(options: DetectSignalsOptions = {}): 
       currentPrice: currentPrice.toFixed(4),
       takeProfitTargets: takeProfitLevels,
       stopLoss: stopLossLevel,
-      clusterFills: bestCluster,
+      clusterFills: normalizeClusterFills(bestCluster) ?? undefined,
     };
 
     if (overallDeadlineExceeded()) {
