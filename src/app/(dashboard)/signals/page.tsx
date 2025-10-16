@@ -96,7 +96,10 @@ const SignalCard = ({ signal, onDelete }: { signal: Signal; onDelete: () => Prom
     }, [signal.clusterFills]);
     
     return (
-        <Card className={cn(signal.status !== 'Open' && "bg-muted/50 dark:bg-background/50")}>
+        <Card className={cn(
+            "transition-transform duration-300 hover:-translate-y-1",
+            signal.status !== 'Open' && "bg-muted/50 dark:bg-background/50"
+        ))}> 
             <CardHeader>
                 <div className="flex flex-col md:flex-row items-start justify-between gap-4">
                     <div className="flex flex-col gap-2">
@@ -104,13 +107,13 @@ const SignalCard = ({ signal, onDelete }: { signal: Signal; onDelete: () => Prom
                             <Badge
                                 variant={signal.type === 'SHORT' ? 'destructive' : 'default'}
                                 className={cn(
-                                    "text-lg py-1 px-4",
+                                    "py-1 px-4 text-base sm:text-lg",
                                     signal.type === 'LONG' && "bg-green-600 text-white hover:bg-green-600/80"
                                 )}
                             >
                                 {signal.type}
                             </Badge>
-                            <CardTitle className="text-2xl">{signal.pair}-USDC</CardTitle>
+                            <CardTitle className="text-xl font-semibold sm:text-2xl">{signal.pair}-USDC</CardTitle>
                         </div>
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
                             <Clock className="w-4 h-4" />
@@ -118,7 +121,7 @@ const SignalCard = ({ signal, onDelete }: { signal: Signal; onDelete: () => Prom
                         </div>
                     </div>
                    
-                    <div className="flex flex-wrap items-center gap-4 w-full md:w-auto md:justify-end">
+                    <div className="flex w-full flex-wrap items-center gap-4 md:w-auto md:justify-end">
                         <div className="flex items-center gap-2 text-right">
                            {getStatusBadge()}
                         </div>
@@ -133,7 +136,7 @@ const SignalCard = ({ signal, onDelete }: { signal: Signal; onDelete: () => Prom
                 </div>
             </CardHeader>
             <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
                     {/* Column 1: Core Signal Info */}
                     <div className="space-y-4">
                          <h4 className="font-semibold text-center md:text-left">Position Details</h4>
