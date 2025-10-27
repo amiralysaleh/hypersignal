@@ -54,21 +54,25 @@ export default function DashboardPage() {
   const attentionSignals = data?.attentionSignals ?? [];
   
   const StatsCard = ({ title, value, subtext, icon: Icon, isLoading }: { title: string, value: string | React.ReactNode, subtext: string, icon: React.ElementType, isLoading: boolean }) => (
-    <Card>
+    <Card className="group relative overflow-hidden border-border/60 bg-card/70 transition-all duration-300 hover:-translate-y-1 hover:border-primary/50 hover:shadow-xl">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 bg-gradient-to-br from-primary/15 via-transparent to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+      />
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium">{title}</CardTitle>
+        <CardTitle className="text-sm font-medium text-balance sm:text-base">{title}</CardTitle>
         <Icon className="h-4 w-4 text-muted-foreground" />
       </CardHeader>
-      <CardContent>
+      <CardContent className="relative">
         {isLoading ? (
           <>
-            <Skeleton className="h-8 w-3/4 mb-1" />
+            <Skeleton className="mb-2 h-8 w-3/4" />
             <Skeleton className="h-4 w-1/2" />
           </>
         ) : (
           <>
-            <div className="text-2xl font-bold">{value}</div>
-            <p className="text-xs text-muted-foreground">{subtext}</p>
+            <div className="text-2xl font-bold md:text-3xl">{value}</div>
+            <p className="text-xs text-muted-foreground md:text-sm">{subtext}</p>
           </>
         )}
       </CardContent>
@@ -322,52 +326,54 @@ export default function DashboardPage() {
           <CardDescription>The most recent signals from your tracked wallets.</CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Pair</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Wallets</TableHead>
-                <TableHead>PnL</TableHead>
-                <TableHead>Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
+          <div className="overflow-x-auto">
+            <Table className="min-w-[680px]">
+              <TableHeader>
                 <TableRow>
-                   <TableCell colSpan={5} className="text-center">Loading signals...</TableCell>
+                  <TableHead>Pair</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Wallets</TableHead>
+                  <TableHead>PnL</TableHead>
+                  <TableHead>Status</TableHead>
                 </TableRow>
-              ) : !data || data.recentSignals.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-center">No recent signals.</TableCell>
-                </TableRow>
-              ) : (
-                data.recentSignals.map((signal, index) => (
-                  <TableRow key={index}>
-                    <TableCell className="font-medium">{signal.pair}</TableCell>
-                    <TableCell>
-                       <Badge
-                        variant={signal.type === 'SHORT' ? 'destructive' : 'default'}
-                        className={cn(
-                          'font-semibold',
-                          signal.type === 'LONG' && 'bg-green-600 text-white hover:bg-green-600/80'
-                        )}
-                      >
-                        {signal.type}
-                      </Badge>
-                    </TableCell>
-                     <TableCell>{signal.contributingWallets}</TableCell>
-                    <TableCell className={signal.pnl >= 0 ? 'text-green-600' : 'text-destructive'}>
-                      ${signal.pnl.toFixed(2)}
-                    </TableCell>
-                    <TableCell>
-                      {getStatusBadge(signal.status)}
-                    </TableCell>
+              </TableHeader>
+              <TableBody>
+                {loading ? (
+                  <TableRow>
+                     <TableCell colSpan={5} className="text-center">Loading signals...</TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+                ) : !data || data.recentSignals.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center">No recent signals.</TableCell>
+                  </TableRow>
+                ) : (
+                  data.recentSignals.map((signal, index) => (
+                    <TableRow key={index}>
+                      <TableCell className="font-medium">{signal.pair}</TableCell>
+                      <TableCell>
+                         <Badge
+                          variant={signal.type === 'SHORT' ? 'destructive' : 'default'}
+                          className={cn(
+                            'font-semibold',
+                            signal.type === 'LONG' && 'bg-green-600 text-white hover:bg-green-600/80'
+                          )}
+                        >
+                          {signal.type}
+                        </Badge>
+                      </TableCell>
+                       <TableCell>{signal.contributingWallets}</TableCell>
+                      <TableCell className={signal.pnl >= 0 ? 'text-green-600' : 'text-destructive'}>
+                        ${signal.pnl.toFixed(2)}
+                      </TableCell>
+                      <TableCell>
+                        {getStatusBadge(signal.status)}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
     </div>
