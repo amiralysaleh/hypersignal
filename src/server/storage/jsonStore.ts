@@ -38,21 +38,37 @@ async function withDbTimeout<T>(label: string, operation: () => Promise<T>): Pro
   }
 }
 
+let ensureTablePromise: Promise<void> | null = null;
+
 async function ensureTable() {
-  const { DB } = getCloudflareEnv();
-  try {
-    await withDbTimeout('ensureTable', () =>
-      DB.prepare(
-        `CREATE TABLE IF NOT EXISTS ${TABLE_NAME} (
-          key TEXT PRIMARY KEY,
-          value TEXT NOT NULL
-        )`
-      ).run()
-    );
-  } catch (error) {
-    console.warn('[jsonStore] Failed to ensure kv_store table', error);
-    throw error;
+  if (ensureTablePromise) {
+    return ensureTablePromise;
   }
+
+  const ensure = async () => {
+    const { DB } = getCloudflareEnv();
+    try {
+      await withDbTimeout('ensureTable', () =>
+        DB.prepare(
+          `CREATE TABLE IF NOT EXISTS ${TABLE_NAME} (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+          )`
+        ).run()
+      );
+    } catch (error) {
+      console.warn('[jsonStore] Failed to ensure kv_store table', error);
+      throw error;
+    }
+  };
+
+  ensureTablePromise = ensure()
+    .catch((error) => {
+      ensureTablePromise = null;
+      throw error;
+    });
+
+  return ensureTablePromise;
 }
 
 async function ensureRow<T>(key: string, defaultValue: T) {
