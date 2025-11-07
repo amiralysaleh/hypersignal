@@ -38,17 +38,27 @@ async function withDbTimeout<T>(label: string, operation: () => Promise<T>): Pro
   }
 }
 
-let ensureTablePromise: Promise<void> | null = null;
+let createTablePromise: Promise<void> | null = null;
 
-async function ensureTable() {
-  if (ensureTablePromise) {
-    return ensureTablePromise;
+function isMissingTableError(error: unknown): boolean {
+  if (!error) {
+    return false;
   }
 
-  const ensure = async () => {
-    const { DB } = getCloudflareEnv();
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('no such table') && message.includes(TABLE_NAME);
+}
+
+async function createTableIfMissing() {
+  if (createTablePromise) {
+    return createTablePromise;
+  }
+
+  const { DB } = getCloudflareEnv();
+
+  const create = async () => {
     try {
-      await withDbTimeout('ensureTable', () =>
+      await withDbTimeout('createTable', () =>
         DB.prepare(
           `CREATE TABLE IF NOT EXISTS ${TABLE_NAME} (
             key TEXT PRIMARY KEY,
@@ -57,30 +67,35 @@ async function ensureTable() {
         ).run()
       );
     } catch (error) {
-      console.warn('[jsonStore] Failed to ensure kv_store table', error);
+      console.warn('[jsonStore] Failed to create kv_store table', error);
       throw error;
     }
   };
 
-  ensureTablePromise = ensure()
-    .catch((error) => {
-      ensureTablePromise = null;
-      throw error;
-    });
+  createTablePromise = create().catch((error) => {
+    createTablePromise = null;
+    throw error;
+  });
 
-  return ensureTablePromise;
+  return createTablePromise;
 }
 
-async function ensureRow<T>(key: string, defaultValue: T) {
-  const { DB } = getCloudflareEnv();
-  await ensureTable();
-  try {
-    await withDbTimeout('ensureRow', () =>
-      DB.prepare(`INSERT OR IGNORE INTO ${TABLE_NAME} (key, value) VALUES (?1, ?2)`).bind(key, JSON.stringify(defaultValue)).run()
-    );
-  } catch (error) {
-    console.warn(`[jsonStore] Failed to ensure row for key ${key}`, error);
-    throw error;
+async function runWithTableRetry<T>(label: string, operation: () => Promise<T>): Promise<T> {
+  let attemptedCreate = false;
+
+  while (true) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!attemptedCreate && isMissingTableError(error)) {
+        attemptedCreate = true;
+        console.warn(`[jsonStore] ${label} failed because table was missing. Creating table and retrying.`);
+        await createTableIfMissing();
+        continue;
+      }
+
+      throw error;
+    }
   }
 }
 
@@ -90,7 +105,13 @@ function resolveKey(relativePath: string) {
 
 export async function ensureFile<T>(relativePath: string, defaultValue: T): Promise<string> {
   const key = resolveKey(relativePath);
-  await ensureRow(key, defaultValue);
+  const { DB } = getCloudflareEnv();
+
+  await runWithTableRetry('ensureRow', () =>
+    withDbTimeout('ensureRow', () =>
+      DB.prepare(`INSERT OR IGNORE INTO ${TABLE_NAME} (key, value) VALUES (?1, ?2)`).bind(key, JSON.stringify(defaultValue)).run()
+    )
+  );
   return key;
 }
 
@@ -100,8 +121,10 @@ export async function readJsonFile<T>(relativePath: string, defaultValue: T): Pr
   let row: { value: string } | null = null;
 
   try {
-    row = await withDbTimeout('readJsonFile', () =>
-      DB.prepare(`SELECT value FROM ${TABLE_NAME} WHERE key = ?1`).bind(key).first<{ value: string }>()
+    row = await runWithTableRetry('readJsonFile', () =>
+      withDbTimeout('readJsonFile', () =>
+        DB.prepare(`SELECT value FROM ${TABLE_NAME} WHERE key = ?1`).bind(key).first<{ value: string }>()
+      )
     );
   } catch (error) {
     console.warn(`[jsonStore] Failed to read key ${key}`, error);
@@ -136,11 +159,12 @@ export async function readJsonFile<T>(relativePath: string, defaultValue: T): Pr
 export async function writeJsonFile<T>(relativePath: string, data: T): Promise<void> {
   const key = resolveKey(relativePath);
   const { DB } = getCloudflareEnv();
-  await ensureTable();
 
   try {
-    await withDbTimeout('writeJsonFile', () =>
-      DB.prepare(`INSERT OR REPLACE INTO ${TABLE_NAME} (key, value) VALUES (?1, ?2)`).bind(key, JSON.stringify(data)).run()
+    await runWithTableRetry('writeJsonFile', () =>
+      withDbTimeout('writeJsonFile', () =>
+        DB.prepare(`INSERT OR REPLACE INTO ${TABLE_NAME} (key, value) VALUES (?1, ?2)`).bind(key, JSON.stringify(data)).run()
+      )
     );
   } catch (error) {
     console.warn(`[jsonStore] Failed to write key ${key}`, error);
