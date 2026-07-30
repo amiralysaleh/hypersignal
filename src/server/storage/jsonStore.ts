@@ -3,6 +3,8 @@ import { getCloudflareEnv } from './env';
 const TABLE_NAME = 'kv_store';
 const KEY_PREFIX = 'json:';
 const DB_OPERATION_TIMEOUT_MS = Math.max(1_000, Number(process.env.DB_OPERATION_TIMEOUT_MS ?? 5_000));
+const DB_TIMEOUT_RETRY_ATTEMPTS = Math.max(1, Number(process.env.DB_TIMEOUT_RETRY_ATTEMPTS ?? 3));
+const DB_TIMEOUT_RETRY_BACKOFF_MS = Math.max(0, Number(process.env.DB_TIMEOUT_RETRY_BACKOFF_MS ?? 500));
 
 export class DbTimeoutError extends Error {
   constructor(message: string) {
@@ -38,33 +40,103 @@ async function withDbTimeout<T>(label: string, operation: () => Promise<T>): Pro
   }
 }
 
-async function ensureTable() {
-  const { DB } = getCloudflareEnv();
-  try {
-    await withDbTimeout('ensureTable', () =>
-      DB.prepare(
-        `CREATE TABLE IF NOT EXISTS ${TABLE_NAME} (
-          key TEXT PRIMARY KEY,
-          value TEXT NOT NULL
-        )`
-      ).run()
-    );
-  } catch (error) {
-    console.warn('[jsonStore] Failed to ensure kv_store table', error);
-    throw error;
+let createTablePromise: Promise<void> | null = null;
+
+function isMissingTableError(error: unknown): boolean {
+  if (!error) {
+    return false;
   }
+
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('no such table') && message.includes(TABLE_NAME);
 }
 
-async function ensureRow<T>(key: string, defaultValue: T) {
+function isDbTimeoutError(error: unknown): error is DbTimeoutError {
+  return error instanceof DbTimeoutError;
+}
+
+async function wait(ms: number) {
+  if (ms <= 0) {
+    return;
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withTimeoutRetries<T>(label: string, operation: () => Promise<T>): Promise<T> {
+  let attempt = 0;
+  let lastError: unknown;
+
+  while (attempt < DB_TIMEOUT_RETRY_ATTEMPTS) {
+    attempt += 1;
+
+    try {
+      return await withDbTimeout(label, operation);
+    } catch (error) {
+      lastError = error;
+
+      if (!isDbTimeoutError(error) || attempt >= DB_TIMEOUT_RETRY_ATTEMPTS) {
+        throw error;
+      }
+
+      const delayMs = DB_TIMEOUT_RETRY_BACKOFF_MS * 2 ** (attempt - 1);
+      console.warn(
+        `[jsonStore] ${label} timed out (attempt ${attempt}/${DB_TIMEOUT_RETRY_ATTEMPTS}). Retrying after ${delayMs}ms.`
+      );
+      await wait(delayMs);
+    }
+  }
+
+  throw lastError ?? new DbTimeoutError(`${label} failed after ${DB_TIMEOUT_RETRY_ATTEMPTS} attempts`);
+}
+
+async function createTableIfMissing() {
+  if (createTablePromise) {
+    return createTablePromise;
+  }
+
   const { DB } = getCloudflareEnv();
-  await ensureTable();
-  try {
-    await withDbTimeout('ensureRow', () =>
-      DB.prepare(`INSERT OR IGNORE INTO ${TABLE_NAME} (key, value) VALUES (?1, ?2)`).bind(key, JSON.stringify(defaultValue)).run()
-    );
-  } catch (error) {
-    console.warn(`[jsonStore] Failed to ensure row for key ${key}`, error);
+
+  const create = async () => {
+    try {
+      await withTimeoutRetries('createTable', () =>
+        DB.prepare(
+          `CREATE TABLE IF NOT EXISTS ${TABLE_NAME} (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+          )`
+        ).run()
+      );
+    } catch (error) {
+      console.warn('[jsonStore] Failed to create kv_store table', error);
+      throw error;
+    }
+  };
+
+  createTablePromise = create().catch((error) => {
+    createTablePromise = null;
     throw error;
+  });
+
+  return createTablePromise;
+}
+
+async function runWithTableRetry<T>(label: string, operation: () => Promise<T>): Promise<T> {
+  let attemptedCreate = false;
+
+  while (true) {
+    try {
+      return await withTimeoutRetries(label, operation);
+    } catch (error) {
+      if (!attemptedCreate && isMissingTableError(error)) {
+        attemptedCreate = true;
+        console.warn(`[jsonStore] ${label} failed because table was missing. Creating table and retrying.`);
+        await createTableIfMissing();
+        continue;
+      }
+
+      throw error;
+    }
   }
 }
 
@@ -74,7 +146,11 @@ function resolveKey(relativePath: string) {
 
 export async function ensureFile<T>(relativePath: string, defaultValue: T): Promise<string> {
   const key = resolveKey(relativePath);
-  await ensureRow(key, defaultValue);
+  const { DB } = getCloudflareEnv();
+
+  await runWithTableRetry('ensureRow', () =>
+    DB.prepare(`INSERT OR IGNORE INTO ${TABLE_NAME} (key, value) VALUES (?1, ?2)`).bind(key, JSON.stringify(defaultValue)).run()
+  );
   return key;
 }
 
@@ -84,7 +160,7 @@ export async function readJsonFile<T>(relativePath: string, defaultValue: T): Pr
   let row: { value: string } | null = null;
 
   try {
-    row = await withDbTimeout('readJsonFile', () =>
+    row = await runWithTableRetry('readJsonFile', () =>
       DB.prepare(`SELECT value FROM ${TABLE_NAME} WHERE key = ?1`).bind(key).first<{ value: string }>()
     );
   } catch (error) {
@@ -120,10 +196,9 @@ export async function readJsonFile<T>(relativePath: string, defaultValue: T): Pr
 export async function writeJsonFile<T>(relativePath: string, data: T): Promise<void> {
   const key = resolveKey(relativePath);
   const { DB } = getCloudflareEnv();
-  await ensureTable();
 
   try {
-    await withDbTimeout('writeJsonFile', () =>
+    await runWithTableRetry('writeJsonFile', () =>
       DB.prepare(`INSERT OR REPLACE INTO ${TABLE_NAME} (key, value) VALUES (?1, ?2)`).bind(key, JSON.stringify(data)).run()
     );
   } catch (error) {
