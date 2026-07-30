@@ -1,3 +1,4 @@
+
 # HyperSignal on Cloudflare
 
 HyperSignal is a Next.js dashboard that monitors Hyperliquid wallets, clusters fills into actionable trading signals, and keeps a full audit trail of its automation. The application now runs entirely on Cloudflare Workers using [OpenNext](https://github.com/opennextjs/opennextjs-cloudflare):
